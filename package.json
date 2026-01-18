@@ -11,7 +11,7 @@
     "build:mac": "tsc && vite build && electron-builder --mac",
     "build:win": "tsc && vite build && electron-builder --win",
     "build:linux": "tsc && vite build && electron-builder --linux",
-    "postinstall": "node scripts/fetch-emoji-assets.js"
+    "postinstall": "node scripts/fetch-emoji-assets.cjs"
   },
   "dependencies": {
     "@fix-webm-duration/fix": "^1.0.1",
