@@ -23,6 +23,5 @@ dist-ssr
 *.sln
 *.sw?
 release/**
-public/telegram-animated-emojis/
 
 # npx electron-builder --mac --win

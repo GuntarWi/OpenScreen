@@ -1,0 +1,3157 @@
+[
+  {
+    "name": "1st Place Medal",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/1st Place Medal.webp"
+  },
+  {
+    "name": "2nd Place Medal",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/2nd Place Medal.webp"
+  },
+  {
+    "name": "3rd Place Medal",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/3rd Place Medal.webp"
+  },
+  {
+    "name": "Admission Tickets",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Admission Tickets.webp"
+  },
+  {
+    "name": "Artist Palette",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Artist Palette.webp"
+  },
+  {
+    "name": "Balloon",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Balloon.webp"
+  },
+  {
+    "name": "Basketball",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Basketball.webp"
+  },
+  {
+    "name": "Christmas Tree",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Christmas Tree.webp"
+  },
+  {
+    "name": "Confetti Ball",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Confetti Ball.webp"
+  },
+  {
+    "name": "Crystal Ball",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Crystal Ball.webp"
+  },
+  {
+    "name": "Firecracker",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Firecracker.webp"
+  },
+  {
+    "name": "Fireworks",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Fireworks.webp"
+  },
+  {
+    "name": "Jack O Lantern",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Jack O Lantern.webp"
+  },
+  {
+    "name": "Magic Wand",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Magic Wand.webp"
+  },
+  {
+    "name": "Military Medal",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Military Medal.webp"
+  },
+  {
+    "name": "Mirror Ball",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Mirror Ball.webp"
+  },
+  {
+    "name": "Party Popper",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Party Popper.webp"
+  },
+  {
+    "name": "Performing Arts",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Performing Arts.webp"
+  },
+  {
+    "name": "Soccer Ball",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Soccer Ball.webp"
+  },
+  {
+    "name": "Sparkler",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Sparkler.webp"
+  },
+  {
+    "name": "Sparkles",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Sparkles.webp"
+  },
+  {
+    "name": "Sports Medal",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Sports Medal.webp"
+  },
+  {
+    "name": "Ticket",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Ticket.webp"
+  },
+  {
+    "name": "Trophy",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Trophy.webp"
+  },
+  {
+    "name": "Video Game",
+    "category": "Activity",
+    "src": "/telegram-animated-emojis/Activity/Video Game.webp"
+  },
+  {
+    "name": "Ant",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Ant.webp"
+  },
+  {
+    "name": "Baby Chick",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Baby Chick.webp"
+  },
+  {
+    "name": "Bat",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Bat.webp"
+  },
+  {
+    "name": "Bear",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Bear.webp"
+  },
+  {
+    "name": "Beetle",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Beetle.webp"
+  },
+  {
+    "name": "Bird",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Bird.webp"
+  },
+  {
+    "name": "Bison",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Bison.webp"
+  },
+  {
+    "name": "Black Cat",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Black Cat.webp"
+  },
+  {
+    "name": "Blossom",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Blossom.webp"
+  },
+  {
+    "name": "Bouquet",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Bouquet.webp"
+  },
+  {
+    "name": "Bug",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Bug.webp"
+  },
+  {
+    "name": "Butterfly",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Butterfly.webp"
+  },
+  {
+    "name": "Cactus",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cactus.webp"
+  },
+  {
+    "name": "Cat Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cat Face.webp"
+  },
+  {
+    "name": "Cat",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cat.webp"
+  },
+  {
+    "name": "Cherry Blossom",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cherry Blossom.webp"
+  },
+  {
+    "name": "Chicken",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Chicken.webp"
+  },
+  {
+    "name": "Cloud With Lightning And Rain",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cloud With Lightning And Rain.webp"
+  },
+  {
+    "name": "Cloud With Lightning",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cloud With Lightning.webp"
+  },
+  {
+    "name": "Cloud With Rain",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cloud With Rain.webp"
+  },
+  {
+    "name": "Cloud With Snow",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cloud With Snow.webp"
+  },
+  {
+    "name": "Cloud",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cloud.webp"
+  },
+  {
+    "name": "Cockroach",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cockroach.webp"
+  },
+  {
+    "name": "Cow",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cow.webp"
+  },
+  {
+    "name": "Cricket",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Cricket.webp"
+  },
+  {
+    "name": "Deciduous Tree",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Deciduous Tree.webp"
+  },
+  {
+    "name": "Deer",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Deer.webp"
+  },
+  {
+    "name": "Dog Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Dog Face.webp"
+  },
+  {
+    "name": "Dove",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Dove.webp"
+  },
+  {
+    "name": "Duck",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Duck.webp"
+  },
+  {
+    "name": "Evergreen Tree",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Evergreen Tree.webp"
+  },
+  {
+    "name": "Fire",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Fire.webp"
+  },
+  {
+    "name": "First Quarter Moon Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/First Quarter Moon Face.webp"
+  },
+  {
+    "name": "First Quarter Moon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/First Quarter Moon.webp"
+  },
+  {
+    "name": "Fish",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Fish.webp"
+  },
+  {
+    "name": "Flamingo",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Flamingo.webp"
+  },
+  {
+    "name": "Four Leaf Clover",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Four Leaf Clover.webp"
+  },
+  {
+    "name": "Fox",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Fox.webp"
+  },
+  {
+    "name": "Frog",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Frog.webp"
+  },
+  {
+    "name": "Front Facing Baby Chick",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Front Facing Baby Chick.webp"
+  },
+  {
+    "name": "Full Moon Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Full Moon Face.webp"
+  },
+  {
+    "name": "Full Moon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Full Moon.webp"
+  },
+  {
+    "name": "Giraffe",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Giraffe.webp"
+  },
+  {
+    "name": "Glowing Star",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Glowing Star.webp"
+  },
+  {
+    "name": "Gorilla",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Gorilla.webp"
+  },
+  {
+    "name": "Hamster",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Hamster.webp"
+  },
+  {
+    "name": "Hatching Chick",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Hatching Chick.webp"
+  },
+  {
+    "name": "Hedgehog",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Hedgehog.webp"
+  },
+  {
+    "name": "Herb",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Herb.webp"
+  },
+  {
+    "name": "Hibiscus",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Hibiscus.webp"
+  },
+  {
+    "name": "High Voltage",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/High Voltage.webp"
+  },
+  {
+    "name": "Honeybee",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Honeybee.webp"
+  },
+  {
+    "name": "Horse Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Horse Face.webp"
+  },
+  {
+    "name": "Horse",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Horse.webp"
+  },
+  {
+    "name": "Kangaroo",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Kangaroo.webp"
+  },
+  {
+    "name": "Koala",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Koala.webp"
+  },
+  {
+    "name": "Lady Beetle",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Lady Beetle.webp"
+  },
+  {
+    "name": "Last Quarter Moon Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Last Quarter Moon Face.webp"
+  },
+  {
+    "name": "Last Quarter Moon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Last Quarter Moon.webp"
+  },
+  {
+    "name": "Leopard",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Leopard.webp"
+  },
+  {
+    "name": "Lion",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Lion.webp"
+  },
+  {
+    "name": "Llama",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Llama.webp"
+  },
+  {
+    "name": "Lobster",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Lobster.webp"
+  },
+  {
+    "name": "Microbe",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Microbe.webp"
+  },
+  {
+    "name": "Monkey Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Monkey Face.webp"
+  },
+  {
+    "name": "Mosquito",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Mosquito.webp"
+  },
+  {
+    "name": "Mouse Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Mouse Face.webp"
+  },
+  {
+    "name": "New Moon Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/New Moon Face.webp"
+  },
+  {
+    "name": "New Moon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/New Moon.webp"
+  },
+  {
+    "name": "Octopus",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Octopus.webp"
+  },
+  {
+    "name": "Owl",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Owl.webp"
+  },
+  {
+    "name": "Ox",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Ox.webp"
+  },
+  {
+    "name": "Palm Tree",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Palm Tree.webp"
+  },
+  {
+    "name": "Panda",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Panda.webp"
+  },
+  {
+    "name": "Parrot",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Parrot.webp"
+  },
+  {
+    "name": "Paw Prints",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Paw Prints.webp"
+  },
+  {
+    "name": "Penguin",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Penguin.webp"
+  },
+  {
+    "name": "Pig Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Pig Face.webp"
+  },
+  {
+    "name": "Pig Nose",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Pig Nose.webp"
+  },
+  {
+    "name": "Polar Bear",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Polar Bear.webp"
+  },
+  {
+    "name": "Rabbit Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Rabbit Face.webp"
+  },
+  {
+    "name": "Rabbit",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Rabbit.webp"
+  },
+  {
+    "name": "Raccoon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Raccoon.webp"
+  },
+  {
+    "name": "Rainbow",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Rainbow.webp"
+  },
+  {
+    "name": "Rose",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Rose.webp"
+  },
+  {
+    "name": "Rosette",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Rosette.webp"
+  },
+  {
+    "name": "Sauropod",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Sauropod.webp"
+  },
+  {
+    "name": "Seal",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Seal.webp"
+  },
+  {
+    "name": "Seedling",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Seedling.webp"
+  },
+  {
+    "name": "Shamrock",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Shamrock.webp"
+  },
+  {
+    "name": "Shrimp",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Shrimp.webp"
+  },
+  {
+    "name": "Snail",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Snail.webp"
+  },
+  {
+    "name": "Snake",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Snake.webp"
+  },
+  {
+    "name": "Snowflake",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Snowflake.webp"
+  },
+  {
+    "name": "Snowman Without Snow",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Snowman Without Snow.webp"
+  },
+  {
+    "name": "Snowman",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Snowman.webp"
+  },
+  {
+    "name": "Spider Web",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Spider Web.webp"
+  },
+  {
+    "name": "Spider",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Spider.webp"
+  },
+  {
+    "name": "Spouting Whale",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Spouting Whale.webp"
+  },
+  {
+    "name": "Squid",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Squid.webp"
+  },
+  {
+    "name": "Star",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Star.webp"
+  },
+  {
+    "name": "Sun Behind Cloud",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Sun Behind Cloud.webp"
+  },
+  {
+    "name": "Sun Behind Large Cloud",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Sun Behind Large Cloud.webp"
+  },
+  {
+    "name": "Sun Behind Rain Cloud",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Sun Behind Rain Cloud.webp"
+  },
+  {
+    "name": "Sun Behind Small Cloud",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Sun Behind Small Cloud.webp"
+  },
+  {
+    "name": "Sun With Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Sun With Face.webp"
+  },
+  {
+    "name": "Sun",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Sun.webp"
+  },
+  {
+    "name": "Swan",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Swan.webp"
+  },
+  {
+    "name": "T Rex",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/T Rex.webp"
+  },
+  {
+    "name": "Tiger Face",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Tiger Face.webp"
+  },
+  {
+    "name": "Tiger",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Tiger.webp"
+  },
+  {
+    "name": "Tropical Fish",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Tropical Fish.webp"
+  },
+  {
+    "name": "Tulip",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Tulip.webp"
+  },
+  {
+    "name": "Turkey",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Turkey.webp"
+  },
+  {
+    "name": "Turtle",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Turtle.webp"
+  },
+  {
+    "name": "Unicorn",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Unicorn.webp"
+  },
+  {
+    "name": "Waning Crescent Moon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Waning Crescent Moon.webp"
+  },
+  {
+    "name": "Waxing Crescent Moon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Waxing Crescent Moon.webp"
+  },
+  {
+    "name": "Waxing Gibbous Moon",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Waxing Gibbous Moon.webp"
+  },
+  {
+    "name": "Zebra",
+    "category": "Animals and Nature",
+    "src": "/telegram-animated-emojis/Animals and Nature/Zebra.webp"
+  },
+  {
+    "name": "Black Flag",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Black Flag.webp"
+  },
+  {
+    "name": "Chequered Flag",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Chequered Flag.webp"
+  },
+  {
+    "name": "Flag Argentina",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Argentina.webp"
+  },
+  {
+    "name": "Flag Armenia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Armenia.webp"
+  },
+  {
+    "name": "Flag Austria",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Austria.webp"
+  },
+  {
+    "name": "Flag Bahamas",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Bahamas.webp"
+  },
+  {
+    "name": "Flag Belarus",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Belarus.webp"
+  },
+  {
+    "name": "Flag Belgium",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Belgium.webp"
+  },
+  {
+    "name": "Flag Benin",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Benin.webp"
+  },
+  {
+    "name": "Flag Brazil",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Brazil.webp"
+  },
+  {
+    "name": "Flag Bulgaria",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Bulgaria.webp"
+  },
+  {
+    "name": "Flag Burkina Faso",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Burkina Faso.webp"
+  },
+  {
+    "name": "Flag Cameroon",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Cameroon.webp"
+  },
+  {
+    "name": "Flag Chad",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Chad.webp"
+  },
+  {
+    "name": "Flag China",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag China.webp"
+  },
+  {
+    "name": "Flag Cote Divoire",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Cote Divoire.webp"
+  },
+  {
+    "name": "Flag Croatia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Croatia.webp"
+  },
+  {
+    "name": "Flag Czechia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Czechia.webp"
+  },
+  {
+    "name": "Flag Djibouti",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Djibouti.webp"
+  },
+  {
+    "name": "Flag Equatorial Guinea",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Equatorial Guinea.webp"
+  },
+  {
+    "name": "Flag Estonia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Estonia.webp"
+  },
+  {
+    "name": "Flag France",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag France.webp"
+  },
+  {
+    "name": "Flag Gabon",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Gabon.webp"
+  },
+  {
+    "name": "Flag Germany",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Germany.webp"
+  },
+  {
+    "name": "Flag Ghana",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Ghana.webp"
+  },
+  {
+    "name": "Flag Guinea Bissau",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Guinea Bissau.webp"
+  },
+  {
+    "name": "Flag Guinea",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Guinea.webp"
+  },
+  {
+    "name": "Flag Hungary",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Hungary.webp"
+  },
+  {
+    "name": "Flag India",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag India.webp"
+  },
+  {
+    "name": "Flag Indonesia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Indonesia.webp"
+  },
+  {
+    "name": "Flag Ireland",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Ireland.webp"
+  },
+  {
+    "name": "Flag Italy",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Italy.webp"
+  },
+  {
+    "name": "Flag Japan",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Japan.webp"
+  },
+  {
+    "name": "Flag Jordan",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Jordan.webp"
+  },
+  {
+    "name": "Flag Lithuania",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Lithuania.webp"
+  },
+  {
+    "name": "Flag Luxembourg",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Luxembourg.webp"
+  },
+  {
+    "name": "Flag Madagascar",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Madagascar.webp"
+  },
+  {
+    "name": "Flag Mali",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Mali.webp"
+  },
+  {
+    "name": "Flag Monaco",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Monaco.webp"
+  },
+  {
+    "name": "Flag Morocco",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Morocco.webp"
+  },
+  {
+    "name": "Flag Mozambique",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Mozambique.webp"
+  },
+  {
+    "name": "Flag Myanmar Burma",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Myanmar Burma.webp"
+  },
+  {
+    "name": "Flag Netherlands",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Netherlands.webp"
+  },
+  {
+    "name": "Flag Nigeria",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Nigeria.webp"
+  },
+  {
+    "name": "Flag Palestinian Territories",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Palestinian Territories.webp"
+  },
+  {
+    "name": "Flag Peru",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Peru.webp"
+  },
+  {
+    "name": "Flag Philippines",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Philippines.webp"
+  },
+  {
+    "name": "Flag Poland",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Poland.webp"
+  },
+  {
+    "name": "Flag Romania",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Romania.webp"
+  },
+  {
+    "name": "Flag Russia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Russia.webp"
+  },
+  {
+    "name": "Flag Sao Tome Principe",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Sao Tome Principe.webp"
+  },
+  {
+    "name": "Flag Saudi Arabia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Saudi Arabia.webp"
+  },
+  {
+    "name": "Flag Senegal",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Senegal.webp"
+  },
+  {
+    "name": "Flag Sierra Leone",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Sierra Leone.webp"
+  },
+  {
+    "name": "Flag Singapore",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Singapore.webp"
+  },
+  {
+    "name": "Flag Sint Maarten",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Sint Maarten.webp"
+  },
+  {
+    "name": "Flag Somalia",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Somalia.webp"
+  },
+  {
+    "name": "Flag South Korea",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag South Korea.webp"
+  },
+  {
+    "name": "Flag South Sudan",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag South Sudan.webp"
+  },
+  {
+    "name": "Flag Spain",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Spain.webp"
+  },
+  {
+    "name": "Flag Sudan",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Sudan.webp"
+  },
+  {
+    "name": "Flag Ukraine",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Ukraine.webp"
+  },
+  {
+    "name": "Flag United Arab Emirates",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag United Arab Emirates.webp"
+  },
+  {
+    "name": "Flag United Kingdom",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag United Kingdom.webp"
+  },
+  {
+    "name": "Flag United States",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag United States.webp"
+  },
+  {
+    "name": "Flag Uzbekistan",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Uzbekistan.webp"
+  },
+  {
+    "name": "Flag Vietnam",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Vietnam.webp"
+  },
+  {
+    "name": "Flag Western Sahara",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Western Sahara.webp"
+  },
+  {
+    "name": "Flag Yemen",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Flag Yemen.webp"
+  },
+  {
+    "name": "Pirate Flag",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Pirate Flag.webp"
+  },
+  {
+    "name": "Triangular Flag",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/Triangular Flag.webp"
+  },
+  {
+    "name": "White Flag",
+    "category": "Flags",
+    "src": "/telegram-animated-emojis/Flags/White Flag.webp"
+  },
+  {
+    "name": "Baby Bottle",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Baby Bottle.webp"
+  },
+  {
+    "name": "Banana",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Banana.webp"
+  },
+  {
+    "name": "Bento Box",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Bento Box.webp"
+  },
+  {
+    "name": "Beverage Box",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Beverage Box.webp"
+  },
+  {
+    "name": "Birthday Cake",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Birthday Cake.webp"
+  },
+  {
+    "name": "Bottle With Popping Cork",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Bottle With Popping Cork.webp"
+  },
+  {
+    "name": "Bubble Tea",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Bubble Tea.webp"
+  },
+  {
+    "name": "Canned Food",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Canned Food.webp"
+  },
+  {
+    "name": "Chocolate Bar",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Chocolate Bar.webp"
+  },
+  {
+    "name": "Clinking Glasses",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Clinking Glasses.webp"
+  },
+  {
+    "name": "Cocktail Glass",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Cocktail Glass.webp"
+  },
+  {
+    "name": "Cookie",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Cookie.webp"
+  },
+  {
+    "name": "Cooking",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Cooking.webp"
+  },
+  {
+    "name": "Cup With Straw",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Cup With Straw.webp"
+  },
+  {
+    "name": "Cupcake",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Cupcake.webp"
+  },
+  {
+    "name": "Custard",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Custard.webp"
+  },
+  {
+    "name": "Dango",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Dango.webp"
+  },
+  {
+    "name": "Doughnut",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Doughnut.webp"
+  },
+  {
+    "name": "Fish Cake With Swirl",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Fish Cake With Swirl.webp"
+  },
+  {
+    "name": "Fork And Knife With Plate",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Fork And Knife With Plate.webp"
+  },
+  {
+    "name": "French Fries",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/French Fries.webp"
+  },
+  {
+    "name": "Glass Of Milk",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Glass Of Milk.webp"
+  },
+  {
+    "name": "Hamburger",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Hamburger.webp"
+  },
+  {
+    "name": "Hot Beverage",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Hot Beverage.webp"
+  },
+  {
+    "name": "Hot Dog",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Hot Dog.webp"
+  },
+  {
+    "name": "Lollipop",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Lollipop.webp"
+  },
+  {
+    "name": "Mate",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Mate.webp"
+  },
+  {
+    "name": "Meat On Bone",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Meat On Bone.webp"
+  },
+  {
+    "name": "Oden",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Oden.webp"
+  },
+  {
+    "name": "Pancakes",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Pancakes.webp"
+  },
+  {
+    "name": "Pie",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Pie.webp"
+  },
+  {
+    "name": "Pizza",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Pizza.webp"
+  },
+  {
+    "name": "Popcorn",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Popcorn.webp"
+  },
+  {
+    "name": "Poultry Leg",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Poultry Leg.webp"
+  },
+  {
+    "name": "Pouring Liquid",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Pouring Liquid.webp"
+  },
+  {
+    "name": "Pretzel",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Pretzel.webp"
+  },
+  {
+    "name": "Rice Ball",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Rice Ball.webp"
+  },
+  {
+    "name": "Rice Cracker",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Rice Cracker.webp"
+  },
+  {
+    "name": "Sandwich",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Sandwich.webp"
+  },
+  {
+    "name": "Shortcake",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Shortcake.webp"
+  },
+  {
+    "name": "Soft Ice Cream",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Soft Ice Cream.webp"
+  },
+  {
+    "name": "Strawberry",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Strawberry.webp"
+  },
+  {
+    "name": "Stuffed Flatbread",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Stuffed Flatbread.webp"
+  },
+  {
+    "name": "Sushi",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Sushi.webp"
+  },
+  {
+    "name": "Taco",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Taco.webp"
+  },
+  {
+    "name": "Tropical Drink",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Tropical Drink.webp"
+  },
+  {
+    "name": "Tumbler Glass",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Tumbler Glass.webp"
+  },
+  {
+    "name": "Wine Glass",
+    "category": "Food and Drink",
+    "src": "/telegram-animated-emojis/Food and Drink/Wine Glass.webp"
+  },
+  {
+    "name": "Abacus",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Abacus.webp"
+  },
+  {
+    "name": "Ballot Box With Ballot",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Ballot Box With Ballot.webp"
+  },
+  {
+    "name": "Bar Chart",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Bar Chart.webp"
+  },
+  {
+    "name": "Bomb",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Bomb.webp"
+  },
+  {
+    "name": "Books",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Books.webp"
+  },
+  {
+    "name": "Briefcase",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Briefcase.webp"
+  },
+  {
+    "name": "Card Index Dividers",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Card Index Dividers.webp"
+  },
+  {
+    "name": "Chart Decreasing",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Chart Decreasing.webp"
+  },
+  {
+    "name": "Chart Increasing",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Chart Increasing.webp"
+  },
+  {
+    "name": "Clapper Board",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Clapper Board.webp"
+  },
+  {
+    "name": "Coffin",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Coffin.webp"
+  },
+  {
+    "name": "Coin",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Coin.webp"
+  },
+  {
+    "name": "Crown",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Crown.webp"
+  },
+  {
+    "name": "File Folder",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/File Folder.webp"
+  },
+  {
+    "name": "Gem Stone",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Gem Stone.webp"
+  },
+  {
+    "name": "Graduation Cap",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Graduation Cap.webp"
+  },
+  {
+    "name": "Handbag",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Handbag.webp"
+  },
+  {
+    "name": "High Heeled Shoe",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/High Heeled Shoe.webp"
+  },
+  {
+    "name": "Hourglass Done",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Hourglass Done.webp"
+  },
+  {
+    "name": "Hourglass Not Done",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Hourglass Not Done.webp"
+  },
+  {
+    "name": "Identification Card",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Identification Card.webp"
+  },
+  {
+    "name": "Inbox Tray",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Inbox Tray.webp"
+  },
+  {
+    "name": "Incoming Envelope",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Incoming Envelope.webp"
+  },
+  {
+    "name": "Key",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Key.webp"
+  },
+  {
+    "name": "Keyboard",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Keyboard.webp"
+  },
+  {
+    "name": "Laptop",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Laptop.webp"
+  },
+  {
+    "name": "Light Bulb",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Light Bulb.webp"
+  },
+  {
+    "name": "Locked With Key",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Locked With Key.webp"
+  },
+  {
+    "name": "Luggage",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Luggage.webp"
+  },
+  {
+    "name": "Magnifying Glass Tilted Left",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Magnifying Glass Tilted Left.webp"
+  },
+  {
+    "name": "Magnifying Glass Tilted Right",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Magnifying Glass Tilted Right.webp"
+  },
+  {
+    "name": "Megaphone",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Megaphone.webp"
+  },
+  {
+    "name": "Memo",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Memo.webp"
+  },
+  {
+    "name": "Microphone",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Microphone.webp"
+  },
+  {
+    "name": "Microscope",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Microscope.webp"
+  },
+  {
+    "name": "Military Helmet",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Military Helmet.webp"
+  },
+  {
+    "name": "Mobile Phone With Arrow",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Mobile Phone With Arrow.webp"
+  },
+  {
+    "name": "Mobile Phone",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Mobile Phone.webp"
+  },
+  {
+    "name": "Money Bag",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Money Bag.webp"
+  },
+  {
+    "name": "Money With Wings",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Money With Wings.webp"
+  },
+  {
+    "name": "Musical Note",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Musical Note.webp"
+  },
+  {
+    "name": "Musical Notes",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Musical Notes.webp"
+  },
+  {
+    "name": "Newspaper",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Newspaper.webp"
+  },
+  {
+    "name": "Old Key",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Old Key.webp"
+  },
+  {
+    "name": "Open Book",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Open Book.webp"
+  },
+  {
+    "name": "Outbox Tray",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Outbox Tray.webp"
+  },
+  {
+    "name": "Pencil",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Pencil.webp"
+  },
+  {
+    "name": "Pill",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Pill.webp"
+  },
+  {
+    "name": "Printer",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Printer.webp"
+  },
+  {
+    "name": "Purse",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Purse.webp"
+  },
+  {
+    "name": "Reminder Ribbon",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Reminder Ribbon.webp"
+  },
+  {
+    "name": "Roll Of Paper",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Roll Of Paper.webp"
+  },
+  {
+    "name": "Shopping Bags",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Shopping Bags.webp"
+  },
+  {
+    "name": "Shopping Cart",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Shopping Cart.webp"
+  },
+  {
+    "name": "Soap",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Soap.webp"
+  },
+  {
+    "name": "Sponge",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Sponge.webp"
+  },
+  {
+    "name": "Stethoscope",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Stethoscope.webp"
+  },
+  {
+    "name": "Studio Microphone",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Studio Microphone.webp"
+  },
+  {
+    "name": "Syringe",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Syringe.webp"
+  },
+  {
+    "name": "Tear Off Calendar",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Tear Off Calendar.webp"
+  },
+  {
+    "name": "Telephone Receiver",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Telephone Receiver.webp"
+  },
+  {
+    "name": "Telephone",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Telephone.webp"
+  },
+  {
+    "name": "Telescope",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Telescope.webp"
+  },
+  {
+    "name": "Television",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Television.webp"
+  },
+  {
+    "name": "Test Tube",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Test Tube.webp"
+  },
+  {
+    "name": "Thermometer",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Thermometer.webp"
+  },
+  {
+    "name": "Toolbox",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Toolbox.webp"
+  },
+  {
+    "name": "Top Hat",
+    "category": "Objects",
+    "src": "/telegram-animated-emojis/Objects/Top Hat.webp"
+  },
+  {
+    "name": "Baby",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Baby.webp"
+  },
+  {
+    "name": "Backhand Index Pointing Down",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Backhand Index Pointing Down.webp"
+  },
+  {
+    "name": "Backhand Index Pointing Left",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Backhand Index Pointing Left.webp"
+  },
+  {
+    "name": "Backhand Index Pointing Right",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Backhand Index Pointing Right.webp"
+  },
+  {
+    "name": "Backhand Index Pointing Up",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Backhand Index Pointing Up.webp"
+  },
+  {
+    "name": "Biting Lip",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Biting Lip.webp"
+  },
+  {
+    "name": "Bone",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Bone.webp"
+  },
+  {
+    "name": "Bust In Silhouette",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Bust In Silhouette.webp"
+  },
+  {
+    "name": "Busts In Silhouette",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Busts In Silhouette.webp"
+  },
+  {
+    "name": "Call Me Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Call Me Hand.webp"
+  },
+  {
+    "name": "Clapping Hands",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Clapping Hands.webp"
+  },
+  {
+    "name": "Crossed Fingers",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Crossed Fingers.webp"
+  },
+  {
+    "name": "Ear With Hearing Aid",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Ear With Hearing Aid.webp"
+  },
+  {
+    "name": "Ear",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Ear.webp"
+  },
+  {
+    "name": "Eyes",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Eyes.webp"
+  },
+  {
+    "name": "Family Man Woman Girl Boy",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Family Man Woman Girl Boy.webp"
+  },
+  {
+    "name": "Flexed Biceps",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Flexed Biceps.webp"
+  },
+  {
+    "name": "Folded Hands",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Folded Hands.webp"
+  },
+  {
+    "name": "Foot",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Foot.webp"
+  },
+  {
+    "name": "Footprints",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Footprints.webp"
+  },
+  {
+    "name": "Hand With Fingers Splayed",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Hand With Fingers Splayed.webp"
+  },
+  {
+    "name": "Hand With Index Finger And Thumb Crossed",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Hand With Index Finger And Thumb Crossed.webp"
+  },
+  {
+    "name": "Handshake",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Handshake.webp"
+  },
+  {
+    "name": "Heart Hands",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Heart Hands.webp"
+  },
+  {
+    "name": "Index Pointing At The Viewer",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Index Pointing At The Viewer.webp"
+  },
+  {
+    "name": "Index Pointing Up",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Index Pointing Up.webp"
+  },
+  {
+    "name": "Left Facing Fist",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Left Facing Fist.webp"
+  },
+  {
+    "name": "Leftwards Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Leftwards Hand.webp"
+  },
+  {
+    "name": "Leg",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Leg.webp"
+  },
+  {
+    "name": "Love You Gesture",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Love You Gesture.webp"
+  },
+  {
+    "name": "Man Dancing",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Dancing.webp"
+  },
+  {
+    "name": "Man Facepalming",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Facepalming.webp"
+  },
+  {
+    "name": "Man Health Worker",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Health Worker.webp"
+  },
+  {
+    "name": "Man Police Officer",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Police Officer.webp"
+  },
+  {
+    "name": "Man Shrugging",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Shrugging.webp"
+  },
+  {
+    "name": "Man Teacher",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Teacher.webp"
+  },
+  {
+    "name": "Man Technologist",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Technologist.webp"
+  },
+  {
+    "name": "Man Vampire",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Vampire.webp"
+  },
+  {
+    "name": "Man Zombie",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Man Zombie.webp"
+  },
+  {
+    "name": "Mechanical Arm",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Mechanical Arm.webp"
+  },
+  {
+    "name": "Mechanical Leg",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Mechanical Leg.webp"
+  },
+  {
+    "name": "Middle Finger",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Middle Finger.webp"
+  },
+  {
+    "name": "Mouth",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Mouth.webp"
+  },
+  {
+    "name": "Mrs Claus",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Mrs Claus.webp"
+  },
+  {
+    "name": "Mx Claus",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Mx Claus.webp"
+  },
+  {
+    "name": "Nail Polish",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Nail Polish.webp"
+  },
+  {
+    "name": "Nose",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Nose.webp"
+  },
+  {
+    "name": "Ok Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Ok Hand.webp"
+  },
+  {
+    "name": "Old Woman",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Old Woman.webp"
+  },
+  {
+    "name": "Oncoming Fist",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Oncoming Fist.webp"
+  },
+  {
+    "name": "Open Hands",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Open Hands.webp"
+  },
+  {
+    "name": "Palm Down Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Palm Down Hand.webp"
+  },
+  {
+    "name": "Palm Up Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Palm Up Hand.webp"
+  },
+  {
+    "name": "Palms Up Together",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Palms Up Together.webp"
+  },
+  {
+    "name": "People Hugging",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/People Hugging.webp"
+  },
+  {
+    "name": "Person Facepalming",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Person Facepalming.webp"
+  },
+  {
+    "name": "Person Shrugging",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Person Shrugging.webp"
+  },
+  {
+    "name": "Pinched Fingers",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Pinched Fingers.webp"
+  },
+  {
+    "name": "Pinching Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Pinching Hand.webp"
+  },
+  {
+    "name": "Pregnant Woman",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Pregnant Woman.webp"
+  },
+  {
+    "name": "Raised Back Of Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Raised Back Of Hand.webp"
+  },
+  {
+    "name": "Raised Fist",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Raised Fist.webp"
+  },
+  {
+    "name": "Raised Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Raised Hand.webp"
+  },
+  {
+    "name": "Raising Hands",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Raising Hands.webp"
+  },
+  {
+    "name": "Right Facing Fist",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Right Facing Fist.webp"
+  },
+  {
+    "name": "Rightwards Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Rightwards Hand.webp"
+  },
+  {
+    "name": "Santa Claus",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Santa Claus.webp"
+  },
+  {
+    "name": "Sign Of The Horns",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Sign Of The Horns.webp"
+  },
+  {
+    "name": "Speaking Head",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Speaking Head.webp"
+  },
+  {
+    "name": "Technologist",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Technologist.webp"
+  },
+  {
+    "name": "Thumbs Down",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Thumbs Down.webp"
+  },
+  {
+    "name": "Thumbs Up",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Thumbs Up.webp"
+  },
+  {
+    "name": "Tongue",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Tongue.webp"
+  },
+  {
+    "name": "Tooth",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Tooth.webp"
+  },
+  {
+    "name": "Vampire",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Vampire.webp"
+  },
+  {
+    "name": "Victory Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Victory Hand.webp"
+  },
+  {
+    "name": "Vulcan Salute",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Vulcan Salute.webp"
+  },
+  {
+    "name": "Waving Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Waving Hand.webp"
+  },
+  {
+    "name": "Woman Dancing",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Dancing.webp"
+  },
+  {
+    "name": "Woman Facepalming",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Facepalming.webp"
+  },
+  {
+    "name": "Woman Health Worker",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Health Worker.webp"
+  },
+  {
+    "name": "Woman Police Officer",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Police Officer.webp"
+  },
+  {
+    "name": "Woman Shrugging",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Shrugging.webp"
+  },
+  {
+    "name": "Woman Technologist",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Technologist.webp"
+  },
+  {
+    "name": "Woman Vampire",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Vampire.webp"
+  },
+  {
+    "name": "Woman Zombie",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Woman Zombie.webp"
+  },
+  {
+    "name": "Writing Hand",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Writing Hand.webp"
+  },
+  {
+    "name": "Zombie",
+    "category": "People",
+    "src": "/telegram-animated-emojis/People/Zombie.webp"
+  },
+  {
+    "name": "Alien Monster",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Alien Monster.webp"
+  },
+  {
+    "name": "Alien",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Alien.webp"
+  },
+  {
+    "name": "Angry Face With Horns",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Angry Face With Horns.webp"
+  },
+  {
+    "name": "Angry Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Angry Face.webp"
+  },
+  {
+    "name": "Anguished Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Anguished Face.webp"
+  },
+  {
+    "name": "Anxious Face With Sweat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Anxious Face With Sweat.webp"
+  },
+  {
+    "name": "Astonished Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Astonished Face.webp"
+  },
+  {
+    "name": "Beaming Face With Smiling Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Beaming Face With Smiling Eyes.webp"
+  },
+  {
+    "name": "Cat With Tears Of Joy",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Cat With Tears Of Joy.webp"
+  },
+  {
+    "name": "Cat With Wry Smile",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Cat With Wry Smile.webp"
+  },
+  {
+    "name": "Clown Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Clown Face.webp"
+  },
+  {
+    "name": "Cold Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Cold Face.webp"
+  },
+  {
+    "name": "Confounded Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Confounded Face.webp"
+  },
+  {
+    "name": "Confused Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Confused Face.webp"
+  },
+  {
+    "name": "Cowboy Hat Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Cowboy Hat Face.webp"
+  },
+  {
+    "name": "Crying Cat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Crying Cat.webp"
+  },
+  {
+    "name": "Crying Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Crying Face.webp"
+  },
+  {
+    "name": "Disappointed Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Disappointed Face.webp"
+  },
+  {
+    "name": "Disguised Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Disguised Face.webp"
+  },
+  {
+    "name": "Dizzy Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Dizzy Face.webp"
+  },
+  {
+    "name": "Dotted Line Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Dotted Line Face.webp"
+  },
+  {
+    "name": "Downcast Face With Sweat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Downcast Face With Sweat.webp"
+  },
+  {
+    "name": "Drooling Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Drooling Face.webp"
+  },
+  {
+    "name": "Exploding Head",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Exploding Head.webp"
+  },
+  {
+    "name": "Expressionless Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Expressionless Face.webp"
+  },
+  {
+    "name": "Face Blowing A Kiss",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face Blowing A Kiss.webp"
+  },
+  {
+    "name": "Face Exhaling",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face Exhaling.webp"
+  },
+  {
+    "name": "Face Holding Back Tears",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face Holding Back Tears.webp"
+  },
+  {
+    "name": "Face In Clouds",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face In Clouds.webp"
+  },
+  {
+    "name": "Face Savoring Food",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face Savoring Food.webp"
+  },
+  {
+    "name": "Face Screaming In Fear",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face Screaming In Fear.webp"
+  },
+  {
+    "name": "Face Vomiting",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face Vomiting.webp"
+  },
+  {
+    "name": "Face With Diagonal Mouth",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Diagonal Mouth.webp"
+  },
+  {
+    "name": "Face With Hand Over Mouth",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Hand Over Mouth.webp"
+  },
+  {
+    "name": "Face With Head Bandage",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Head Bandage.webp"
+  },
+  {
+    "name": "Face With Medical Mask",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Medical Mask.webp"
+  },
+  {
+    "name": "Face With Monocle",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Monocle.webp"
+  },
+  {
+    "name": "Face With Open Eyes And Hand Over Mouth",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Open Eyes And Hand Over Mouth.webp"
+  },
+  {
+    "name": "Face With Open Mouth",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Open Mouth.webp"
+  },
+  {
+    "name": "Face With Peeking Eye",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Peeking Eye.webp"
+  },
+  {
+    "name": "Face With Raised Eyebrow",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Raised Eyebrow.webp"
+  },
+  {
+    "name": "Face With Rolling Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Rolling Eyes.webp"
+  },
+  {
+    "name": "Face With Spiral Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Spiral Eyes.webp"
+  },
+  {
+    "name": "Face With Steam From Nose",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Steam From Nose.webp"
+  },
+  {
+    "name": "Face With Symbols On Mouth",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Symbols On Mouth.webp"
+  },
+  {
+    "name": "Face With Tears Of Joy",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Tears Of Joy.webp"
+  },
+  {
+    "name": "Face With Thermometer",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Thermometer.webp"
+  },
+  {
+    "name": "Face With Tongue",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face With Tongue.webp"
+  },
+  {
+    "name": "Face Without Mouth",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Face Without Mouth.webp"
+  },
+  {
+    "name": "Fearful Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Fearful Face.webp"
+  },
+  {
+    "name": "Flushed Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Flushed Face.webp"
+  },
+  {
+    "name": "Frowning Face With Open Mouth",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Frowning Face With Open Mouth.webp"
+  },
+  {
+    "name": "Frowning Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Frowning Face.webp"
+  },
+  {
+    "name": "Ghost",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Ghost.webp"
+  },
+  {
+    "name": "Goblin",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Goblin.webp"
+  },
+  {
+    "name": "Grimacing Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grimacing Face.webp"
+  },
+  {
+    "name": "Grinning Cat With Smiling Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grinning Cat With Smiling Eyes.webp"
+  },
+  {
+    "name": "Grinning Cat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grinning Cat.webp"
+  },
+  {
+    "name": "Grinning Face With Big Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grinning Face With Big Eyes.webp"
+  },
+  {
+    "name": "Grinning Face With Smiling Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grinning Face With Smiling Eyes.webp"
+  },
+  {
+    "name": "Grinning Face With Sweat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grinning Face With Sweat.webp"
+  },
+  {
+    "name": "Grinning Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grinning Face.webp"
+  },
+  {
+    "name": "Grinning Squinting Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Grinning Squinting Face.webp"
+  },
+  {
+    "name": "Hear No Evil Monkey",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Hear No Evil Monkey.webp"
+  },
+  {
+    "name": "Hot Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Hot Face.webp"
+  },
+  {
+    "name": "Hugging Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Hugging Face.webp"
+  },
+  {
+    "name": "Hushed Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Hushed Face.webp"
+  },
+  {
+    "name": "Kissing Cat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Kissing Cat.webp"
+  },
+  {
+    "name": "Kissing Face With Closed Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Kissing Face With Closed Eyes.webp"
+  },
+  {
+    "name": "Kissing Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Kissing Face.webp"
+  },
+  {
+    "name": "Loudly Crying Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Loudly Crying Face.webp"
+  },
+  {
+    "name": "Lying Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Lying Face.webp"
+  },
+  {
+    "name": "Melting Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Melting Face.webp"
+  },
+  {
+    "name": "Money Mouth Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Money Mouth Face.webp"
+  },
+  {
+    "name": "Nauseated Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Nauseated Face.webp"
+  },
+  {
+    "name": "Nerd Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Nerd Face.webp"
+  },
+  {
+    "name": "Neutral Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Neutral Face.webp"
+  },
+  {
+    "name": "Ogre",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Ogre.webp"
+  },
+  {
+    "name": "Partying Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Partying Face.webp"
+  },
+  {
+    "name": "Pensive Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Pensive Face.webp"
+  },
+  {
+    "name": "Persevering Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Persevering Face.webp"
+  },
+  {
+    "name": "Pile Of Poo",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Pile Of Poo.webp"
+  },
+  {
+    "name": "Pleading Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Pleading Face.webp"
+  },
+  {
+    "name": "Pouting Cat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Pouting Cat.webp"
+  },
+  {
+    "name": "Pouting Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Pouting Face.webp"
+  },
+  {
+    "name": "Relieved Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Relieved Face.webp"
+  },
+  {
+    "name": "Robot",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Robot.webp"
+  },
+  {
+    "name": "Rolling On The Floor Laughing",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Rolling On The Floor Laughing.webp"
+  },
+  {
+    "name": "Sad But Relieved Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Sad But Relieved Face.webp"
+  },
+  {
+    "name": "Saluting Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Saluting Face.webp"
+  },
+  {
+    "name": "See No Evil Monkey",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/See No Evil Monkey.webp"
+  },
+  {
+    "name": "Shushing Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Shushing Face.webp"
+  },
+  {
+    "name": "Skull And Crossbones",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Skull And Crossbones.webp"
+  },
+  {
+    "name": "Skull",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Skull.webp"
+  },
+  {
+    "name": "Sleeping Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Sleeping Face.webp"
+  },
+  {
+    "name": "Sleepy Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Sleepy Face.webp"
+  },
+  {
+    "name": "Slightly Frowning Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Slightly Frowning Face.webp"
+  },
+  {
+    "name": "Slightly Smiling Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Slightly Smiling Face.webp"
+  },
+  {
+    "name": "Smiling Cat With Heart Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Cat With Heart Eyes.webp"
+  },
+  {
+    "name": "Smiling Face With Halo",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Face With Halo.webp"
+  },
+  {
+    "name": "Smiling Face With Hearts",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Face With Hearts.webp"
+  },
+  {
+    "name": "Smiling Face With Horns",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Face With Horns.webp"
+  },
+  {
+    "name": "Smiling Face With Smiling Eyes",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Face With Smiling Eyes.webp"
+  },
+  {
+    "name": "Smiling Face With Sunglasses",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Face With Sunglasses.webp"
+  },
+  {
+    "name": "Smiling Face With Tear",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Face With Tear.webp"
+  },
+  {
+    "name": "Smiling Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smiling Face.webp"
+  },
+  {
+    "name": "Smirking Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Smirking Face.webp"
+  },
+  {
+    "name": "Sneezing Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Sneezing Face.webp"
+  },
+  {
+    "name": "Speak No Evil Monkey",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Speak No Evil Monkey.webp"
+  },
+  {
+    "name": "Squinting Face With Tongue",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Squinting Face With Tongue.webp"
+  },
+  {
+    "name": "Star Struck",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Star Struck.webp"
+  },
+  {
+    "name": "Thinking Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Thinking Face.webp"
+  },
+  {
+    "name": "Tired Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Tired Face.webp"
+  },
+  {
+    "name": "Unamused Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Unamused Face.webp"
+  },
+  {
+    "name": "Upside Down Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Upside Down Face.webp"
+  },
+  {
+    "name": "Weary Cat",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Weary Cat.webp"
+  },
+  {
+    "name": "Weary Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Weary Face.webp"
+  },
+  {
+    "name": "Winking Face With Tongue",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Winking Face With Tongue.webp"
+  },
+  {
+    "name": "Winking Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Winking Face.webp"
+  },
+  {
+    "name": "Woozy Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Woozy Face.webp"
+  },
+  {
+    "name": "Worried Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Worried Face.webp"
+  },
+  {
+    "name": "Yawning Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Yawning Face.webp"
+  },
+  {
+    "name": "Zany Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Zany Face.webp"
+  },
+  {
+    "name": "Zipper Mouth Face",
+    "category": "Smileys",
+    "src": "/telegram-animated-emojis/Smileys/Zipper Mouth Face.webp"
+  },
+  {
+    "name": "Anger Symbol",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Anger Symbol.webp"
+  },
+  {
+    "name": "Aquarius",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Aquarius.webp"
+  },
+  {
+    "name": "Aries",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Aries.webp"
+  },
+  {
+    "name": "Baby Symbol",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Baby Symbol.webp"
+  },
+  {
+    "name": "Baggage Claim",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Baggage Claim.webp"
+  },
+  {
+    "name": "Beating Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Beating Heart.webp"
+  },
+  {
+    "name": "Black Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Black Heart.webp"
+  },
+  {
+    "name": "Blue Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Blue Heart.webp"
+  },
+  {
+    "name": "Broken Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Broken Heart.webp"
+  },
+  {
+    "name": "Brown Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Brown Heart.webp"
+  },
+  {
+    "name": "Cancer",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Cancer.webp"
+  },
+  {
+    "name": "Capricorn",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Capricorn.webp"
+  },
+  {
+    "name": "Check Box With Check",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Check Box With Check.webp"
+  },
+  {
+    "name": "Check Mark Button",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Check Mark Button.webp"
+  },
+  {
+    "name": "Check Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Check Mark.webp"
+  },
+  {
+    "name": "Collision",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Collision.webp"
+  },
+  {
+    "name": "Cool Button",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Cool Button.webp"
+  },
+  {
+    "name": "Cross Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Cross Mark.webp"
+  },
+  {
+    "name": "Currency Exchange",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Currency Exchange.webp"
+  },
+  {
+    "name": "Customs",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Customs.webp"
+  },
+  {
+    "name": "Dizzy",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Dizzy.webp"
+  },
+  {
+    "name": "Double Exclamation Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Double Exclamation Mark.webp"
+  },
+  {
+    "name": "Exclamation Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Exclamation Mark.webp"
+  },
+  {
+    "name": "Exclamation Question Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Exclamation Question Mark.webp"
+  },
+  {
+    "name": "Free Button",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Free Button.webp"
+  },
+  {
+    "name": "Gemini",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Gemini.webp"
+  },
+  {
+    "name": "Green Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Green Heart.webp"
+  },
+  {
+    "name": "Growing Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Growing Heart.webp"
+  },
+  {
+    "name": "Heart Decoration",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Heart Decoration.webp"
+  },
+  {
+    "name": "Heart Exclamation",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Heart Exclamation.webp"
+  },
+  {
+    "name": "Heart On Fire",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Heart On Fire.webp"
+  },
+  {
+    "name": "Heart With Arrow",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Heart With Arrow.webp"
+  },
+  {
+    "name": "Heart With Ribbon",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Heart With Ribbon.webp"
+  },
+  {
+    "name": "Hundred Points",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Hundred Points.webp"
+  },
+  {
+    "name": "Kiss Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Kiss Mark.webp"
+  },
+  {
+    "name": "Left Luggage",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Left Luggage.webp"
+  },
+  {
+    "name": "Leo",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Leo.webp"
+  },
+  {
+    "name": "Libra",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Libra.webp"
+  },
+  {
+    "name": "Love Letter",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Love Letter.webp"
+  },
+  {
+    "name": "Mending Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Mending Heart.webp"
+  },
+  {
+    "name": "Mens Room",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Mens Room.webp"
+  },
+  {
+    "name": "New Button",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/New Button.webp"
+  },
+  {
+    "name": "No One Under Eighteen",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/No One Under Eighteen.webp"
+  },
+  {
+    "name": "Ok Button",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Ok Button.webp"
+  },
+  {
+    "name": "Ophiuchus",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Ophiuchus.webp"
+  },
+  {
+    "name": "Orange Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Orange Heart.webp"
+  },
+  {
+    "name": "Passport Control",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Passport Control.webp"
+  },
+  {
+    "name": "Pisces",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Pisces.webp"
+  },
+  {
+    "name": "Purple Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Purple Heart.webp"
+  },
+  {
+    "name": "Question Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Question Mark.webp"
+  },
+  {
+    "name": "Red Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Red Heart.webp"
+  },
+  {
+    "name": "Revolving Hearts",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Revolving Hearts.webp"
+  },
+  {
+    "name": "Right Anger Bubble",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Right Anger Bubble.webp"
+  },
+  {
+    "name": "Sagittarius",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Sagittarius.webp"
+  },
+  {
+    "name": "Scorpio",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Scorpio.webp"
+  },
+  {
+    "name": "Sparkling Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Sparkling Heart.webp"
+  },
+  {
+    "name": "Speech Balloon",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Speech Balloon.webp"
+  },
+  {
+    "name": "Taurus",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Taurus.webp"
+  },
+  {
+    "name": "Thought Balloon",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Thought Balloon.webp"
+  },
+  {
+    "name": "Top Arrow",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Top Arrow.webp"
+  },
+  {
+    "name": "Two Hearts",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Two Hearts.webp"
+  },
+  {
+    "name": "Up Button",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Up Button.webp"
+  },
+  {
+    "name": "Virgo",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Virgo.webp"
+  },
+  {
+    "name": "White Exclamation Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/White Exclamation Mark.webp"
+  },
+  {
+    "name": "White Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/White Heart.webp"
+  },
+  {
+    "name": "White Question Mark",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/White Question Mark.webp"
+  },
+  {
+    "name": "Womens Room",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Womens Room.webp"
+  },
+  {
+    "name": "Yellow Heart",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Yellow Heart.webp"
+  },
+  {
+    "name": "Zzz",
+    "category": "Symbols",
+    "src": "/telegram-animated-emojis/Symbols/Zzz.webp"
+  },
+  {
+    "name": "Airplane",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Airplane.webp"
+  },
+  {
+    "name": "Ambulance",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Ambulance.webp"
+  },
+  {
+    "name": "Automobile",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Automobile.webp"
+  },
+  {
+    "name": "Beach With Umbrella",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Beach With Umbrella.webp"
+  },
+  {
+    "name": "Camping",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Camping.webp"
+  },
+  {
+    "name": "Classical Building",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Classical Building.webp"
+  },
+  {
+    "name": "Compass",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Compass.webp"
+  },
+  {
+    "name": "Desert Island",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Desert Island.webp"
+  },
+  {
+    "name": "Hot Springs",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Hot Springs.webp"
+  },
+  {
+    "name": "House",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/House.webp"
+  },
+  {
+    "name": "Locomotive",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Locomotive.webp"
+  },
+  {
+    "name": "Moai",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Moai.webp"
+  },
+  {
+    "name": "Motor Boat",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Motor Boat.webp"
+  },
+  {
+    "name": "Police Car",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Police Car.webp"
+  },
+  {
+    "name": "Rocket",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Rocket.webp"
+  },
+  {
+    "name": "Roller Coaster",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Roller Coaster.webp"
+  },
+  {
+    "name": "Taxi",
+    "category": "Travel and Places",
+    "src": "/telegram-animated-emojis/Travel and Places/Taxi.webp"
+  }
+]
