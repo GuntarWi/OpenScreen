@@ -1,4 +1,6 @@
-import { ipcMain, desktopCapturer, BrowserWindow, shell, app, dialog, screen } from 'electron'
+import electron from 'electron'
+
+const { ipcMain, desktopCapturer, BrowserWindow, shell, app, dialog, screen } = electron
 
 import fs from 'node:fs/promises'
 import path from 'node:path'

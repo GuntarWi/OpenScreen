@@ -76,72 +76,74 @@ export function EffectSettingsPanel({ effect, onChange, onDelete }: EffectSettin
         </div>
 
         {effect.type === 'perspective' && (
-        <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs font-medium text-slate-200">Tilt</div>
-              <p className="text-[11px] text-slate-500">Simulates a perspective lean.</p>
+          <>
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-medium text-slate-200">Tilt</div>
+                  <p className="text-[11px] text-slate-500">Simulates a perspective lean.</p>
+                </div>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  {tiltX.toFixed(1)}° / {tiltY.toFixed(1)}°
+                </span>
+              </div>
+              <div className="grid gap-2">
+                <div>
+                  <div className="text-[11px] text-slate-400 mb-1">Horizontal (Y)</div>
+                  <Slider
+                    value={[tiltX]}
+                    onValueChange={([value]) => onChange({ tiltXDeg: value })}
+                    min={-30}
+                    max={30}
+                    step={0.5}
+                    className={cn("[&_[role=slider]]:bg-[#EC4899] [&_[role=slider]]:border-[#EC4899]")}
+                  />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400 mb-1">Vertical (X)</div>
+                  <Slider
+                    value={[tiltY]}
+                    onValueChange={([value]) => onChange({ tiltYDeg: value })}
+                    min={-30}
+                    max={30}
+                    step={0.5}
+                    className={cn("[&_[role=slider]]:bg-[#EC4899] [&_[role=slider]]:border-[#EC4899]")}
+                  />
+                </div>
+              </div>
             </div>
-            <span className="text-[11px] text-slate-400 font-mono">
-              {tiltX.toFixed(1)}° / {tiltY.toFixed(1)}°
-            </span>
-          </div>
-          <div className="grid gap-2">
-            <div>
-              <div className="text-[11px] text-slate-400 mb-1">Horizontal (Y)</div>
+
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Roll</div>
+                <span className="text-[11px] text-slate-400 font-mono">{roll.toFixed(1)}°</span>
+              </div>
               <Slider
-                value={[tiltX]}
-                onValueChange={([value]) => onChange({ tiltXDeg: value })}
-                min={-30}
-                max={30}
+                value={[roll]}
+                onValueChange={([value]) => onChange({ rollDeg: value })}
+                min={-20}
+                max={20}
                 step={0.5}
                 className={cn("[&_[role=slider]]:bg-[#EC4899] [&_[role=slider]]:border-[#EC4899]")}
               />
             </div>
-              <div>
-                <div className="text-[11px] text-slate-400 mb-1">Vertical (X)</div>
-                <Slider
-                  value={[tiltY]}
-                  onValueChange={([value]) => onChange({ tiltYDeg: value })}
-                  min={-30}
-                  max={30}
-                  step={0.5}
+
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Scale</div>
+                <span className="text-[11px] text-slate-400 font-mono">{(scale * 100).toFixed(0)}%</span>
+              </div>
+              <Slider
+                value={[scale]}
+                onValueChange={([value]) => onChange({ scale: value })}
+                min={0.75}
+                max={1.25}
+                step={0.01}
                 className={cn("[&_[role=slider]]:bg-[#EC4899] [&_[role=slider]]:border-[#EC4899]")}
               />
+              <p className="text-[11px] text-slate-500">Scaling blends with zoom so you can mix both.</p>
             </div>
-          </div>
-        </div>
-
-        <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium text-slate-200">Roll</div>
-              <span className="text-[11px] text-slate-400 font-mono">{roll.toFixed(1)}°</span>
-            </div>
-            <Slider
-              value={[roll]}
-              onValueChange={([value]) => onChange({ rollDeg: value })}
-              min={-20}
-              max={20}
-              step={0.5}
-            className={cn("[&_[role=slider]]:bg-[#EC4899] [&_[role=slider]]:border-[#EC4899]")}
-          />
-        </div>
-
-        <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium text-slate-200">Scale</div>
-              <span className="text-[11px] text-slate-400 font-mono">{(scale * 100).toFixed(0)}%</span>
-            </div>
-            <Slider
-              value={[scale]}
-              onValueChange={([value]) => onChange({ scale: value })}
-              min={0.75}
-              max={1.25}
-              step={0.01}
-            className={cn("[&_[role=slider]]:bg-[#EC4899] [&_[role=slider]]:border-[#EC4899]")}
-          />
-          <p className="text-[11px] text-slate-500">Scaling blends with zoom so you can mix both.</p>
-        </div>
+          </>
         )}
 
         {effect.type === 'shake' && (

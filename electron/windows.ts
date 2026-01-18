@@ -1,7 +1,8 @@
-import { BrowserWindow, screen } from 'electron'
-import { ipcMain } from 'electron'
+import electron from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const { BrowserWindow, screen, ipcMain } = electron
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 

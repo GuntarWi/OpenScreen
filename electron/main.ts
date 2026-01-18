@@ -1,10 +1,36 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
+import electron from 'electron'
+import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow } from './windows'
-import { registerIpcHandlers } from './ipc/handlers'
+import { createRequire } from 'node:module'
 
+// When executed via plain Node (e.g., vite dev runner), electron import resolves to the binary path string.
+// In that case, re-spawn this entry with the Electron binary so Electron APIs are available.
+const electronAsAny = electron as any
+const electronBinary =
+  typeof electronAsAny === 'string'
+    ? electronAsAny
+    : typeof electronAsAny?.default === 'string'
+      ? electronAsAny.default
+      : createRequire(import.meta.url)('electron')
+
+if (!electronAsAny?.app) {
+  const binary = electronBinary
+  if (!binary) {
+    throw new Error('Unable to locate Electron binary to restart dev server')
+  }
+  const selfPath = fileURLToPath(import.meta.url)
+  const child = spawn(binary, [selfPath], {
+    stdio: 'inherit',
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '0' },
+  })
+  child.on('close', (code) => process.exit(code ?? 0))
+  // Prevent the rest of this file from running in plain Node.
+  process.exit(0)
+}
+
+const { app, BrowserWindow, Tray, Menu, nativeImage } = electron as typeof import('electron')
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -38,6 +64,18 @@ export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+
+// Lazy-loaded Electron windows and IPC modules
+let createHudOverlayWindow: () => BrowserWindow
+let createEditorWindow: () => BrowserWindow
+let createSourceSelectorWindow: () => BrowserWindow
+let registerIpcHandlers: (
+  createEditorWindow: () => void,
+  createSourceSelectorWindow: () => BrowserWindow,
+  getMainWindow: () => BrowserWindow | null,
+  getSourceSelectorWindow: () => BrowserWindow | null,
+  onRecordingStateChange?: (recording: boolean, sourceName: string) => void
+) => void
 
 // Window references
 let mainWindow: BrowserWindow | null = null
@@ -138,6 +176,12 @@ app.on('activate', () => {
 
 // Register all IPC handlers when app is ready
 app.whenReady().then(async () => {
+    const windowsModule = await import('./windows')
+    const ipcModule = await import('./ipc/handlers')
+    createHudOverlayWindow = windowsModule.createHudOverlayWindow
+    createEditorWindow = windowsModule.createEditorWindow
+    createSourceSelectorWindow = windowsModule.createSourceSelectorWindow
+    registerIpcHandlers = ipcModule.registerIpcHandlers
     // Listen for HUD overlay quit event (macOS only)
     const { ipcMain } = await import('electron');
     ipcMain.on('hud-overlay-close', () => {
