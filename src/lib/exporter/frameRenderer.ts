@@ -8,6 +8,11 @@ import { clampFocusToStage as clampFocusToStageUtil } from '@/components/video-e
 import { renderAnnotations } from './annotationRenderer';
 import { computeEffectState, type CombinedEffectState } from '@/components/video-editor/videoPlayback/effectUtils';
 
+const EFFECT_PERSPECTIVE = 1200;
+const SKEW_TO_TILT_RATIO = 0.55;
+const RAD_TO_DEG = 180 / Math.PI;
+const DEG_TO_RAD = Math.PI / 180;
+
 interface FrameRenderConfig {
   width: number;
   height: number;
@@ -48,6 +53,8 @@ export class FrameRenderer {
   private shadowCtx: CanvasRenderingContext2D | null = null;
   private compositeCanvas: HTMLCanvasElement | null = null;
   private compositeCtx: CanvasRenderingContext2D | null = null;
+  private screenCanvas: HTMLCanvasElement | null = null;
+  private screenCtx: CanvasRenderingContext2D | null = null;
   private config: FrameRenderConfig;
   private animationState: AnimationState;
   private layoutCache: any = null;
@@ -115,6 +122,16 @@ export class FrameRenderer {
     
     if (!this.compositeCtx) {
       throw new Error('Failed to get 2D context for composite canvas');
+    }
+
+    // Setup screen canvas for effect transforms
+    this.screenCanvas = document.createElement('canvas');
+    this.screenCanvas.width = this.config.width;
+    this.screenCanvas.height = this.config.height;
+    this.screenCtx = this.screenCanvas.getContext('2d', { willReadFrequently: false });
+
+    if (!this.screenCtx) {
+      throw new Error('Failed to get 2D context for screen canvas');
     }
 
     // Setup shadow canvas if needed
@@ -372,6 +389,211 @@ export class FrameRenderer {
     return clampFocusToStageUtil(focus, depth as any, this.layoutCache);
   }
 
+  private computeEffectTransform(
+    effectState: CombinedEffectState,
+    w: number,
+    h: number
+  ): { a: number; b: number; c: number; d: number; e: number; f: number } {
+    const scale = effectState.scale ?? 1;
+    const offsetX = effectState.offsetX ?? 0;
+    const offsetY = effectState.offsetY ?? 0;
+    const rollDeg = (effectState.roll ?? 0) * RAD_TO_DEG;
+    const rotXDeg = (effectState.tiltYDeg ?? ((effectState.skewY ?? 0) * RAD_TO_DEG) / SKEW_TO_TILT_RATIO) || 0;
+    const rotYDeg = -((effectState.tiltXDeg ?? ((effectState.skewX ?? 0) * RAD_TO_DEG) / SKEW_TO_TILT_RATIO) || 0);
+
+    // Use DOMMatrix to mirror the preview transform as closely as possible
+    if (typeof DOMMatrix !== 'undefined' && typeof DOMPoint !== 'undefined') {
+      const matrix = new DOMMatrix();
+      matrix.m34 = -1 / EFFECT_PERSPECTIVE;
+      matrix.scaleSelf(scale, scale, 1);
+      matrix.translateSelf(offsetX, offsetY, 0);
+      // Match on-screen CSS transform order and orientation
+      matrix.rotateSelf(rotXDeg, rotYDeg, rollDeg);
+
+      const centerX = w / 2;
+      const centerY = h / 2;
+
+      const project = (x: number, y: number) => {
+        const pt = new DOMPoint(x - centerX, y - centerY, 0, 1).matrixTransform(matrix);
+        const wComp = pt.w || 1;
+        return {
+          x: pt.x / wComp + centerX,
+          y: pt.y / wComp + centerY,
+        };
+      };
+
+      const p0 = project(0, 0);
+      const p1 = project(w, 0);
+      const p2 = project(0, h);
+
+      return {
+        a: (p1.x - p0.x) / w,
+        b: (p1.y - p0.y) / w,
+        c: (p2.x - p0.x) / h,
+        d: (p2.y - p0.y) / h,
+        e: p0.x,
+        f: p0.y,
+      };
+    }
+
+    // Fallback affine approximation when DOMMatrix is unavailable
+    const rollRad = effectState.roll ?? 0;
+    const skewX = (rotXDeg * DEG_TO_RAD) * SKEW_TO_TILT_RATIO;
+    const skewY = (rotYDeg * DEG_TO_RAD) * SKEW_TO_TILT_RATIO;
+
+    const centerX = w / 2;
+    const centerY = h / 2;
+
+    const applyFallback = (x: number, y: number) => {
+      // Translate to center
+      let px = x - centerX;
+      let py = y - centerY;
+
+      // Apply scale then offset
+      px *= scale;
+      py *= scale;
+      px += offsetX;
+      py += offsetY;
+
+      // Roll around Z axis
+      if (rollRad !== 0) {
+        const cosR = Math.cos(rollRad);
+        const sinR = Math.sin(rollRad);
+        const rx = px * cosR - py * sinR;
+        const ry = px * sinR + py * cosR;
+        px = rx;
+        py = ry;
+      }
+
+      // Approximate perspective lean using skew (with corrected sign to match preview)
+      const sx = px + skewX * py;
+      const sy = py + skewY * px;
+
+      return { x: sx + centerX, y: sy + centerY };
+    };
+
+    const f0 = applyFallback(0, 0);
+    const f1 = applyFallback(w, 0);
+    const f2 = applyFallback(0, h);
+
+    return {
+      a: (f1.x - f0.x) / w,
+      b: (f1.y - f0.y) / w,
+      c: (f2.x - f0.x) / h,
+      d: (f2.y - f0.y) / h,
+      e: f0.x,
+      f: f0.y,
+    };
+  }
+
+  private createProjectionFunction(
+    effectState: CombinedEffectState,
+    w: number,
+    h: number
+  ): ((x: number, y: number) => { x: number; y: number }) | null {
+    if (typeof DOMMatrix === 'undefined' || typeof DOMPoint === 'undefined') {
+      return null;
+    }
+
+    const scale = effectState.scale ?? 1;
+    const offsetX = effectState.offsetX ?? 0;
+    const offsetY = effectState.offsetY ?? 0;
+    const rollDeg = (effectState.roll ?? 0) * RAD_TO_DEG;
+    const rotXDeg = (effectState.tiltYDeg ?? ((effectState.skewY ?? 0) * RAD_TO_DEG) / SKEW_TO_TILT_RATIO) || 0;
+    const rotYDeg = -((effectState.tiltXDeg ?? ((effectState.skewX ?? 0) * RAD_TO_DEG) / SKEW_TO_TILT_RATIO) || 0);
+
+    const matrix = new DOMMatrix();
+    matrix.m34 = -1 / EFFECT_PERSPECTIVE;
+    matrix.scaleSelf(scale, scale, 1);
+    matrix.translateSelf(offsetX, offsetY, 0);
+    matrix.rotateSelf(rotXDeg, rotYDeg, rollDeg);
+
+    const centerX = w / 2;
+    const centerY = h / 2;
+
+    return (x: number, y: number) => {
+      const pt = new DOMPoint(x - centerX, y - centerY, 0, 1).matrixTransform(matrix);
+      const wComp = pt.w || 1;
+      return {
+        x: pt.x / wComp + centerX,
+        y: pt.y / wComp + centerY,
+      };
+    };
+  }
+
+  private drawScreenWithPerspective(
+    ctx: CanvasRenderingContext2D,
+    source: HTMLCanvasElement,
+    effectState: CombinedEffectState
+  ): void {
+    const w = source.width;
+    const h = source.height;
+    const project = this.createProjectionFunction(effectState, w, h);
+
+    if (!project) {
+      const affine = this.computeEffectTransform(effectState, w, h);
+      ctx.save();
+      ctx.setTransform(affine.a, affine.b, affine.c, affine.d, affine.e, affine.f);
+      ctx.drawImage(source, 0, 0, w, h);
+      ctx.restore();
+      return;
+    }
+
+    // Use a 2D grid of patches for proper perspective in both X and Y directions
+    // Each grid point is projected using the full 3D matrix for accurate perspective
+    const subdivisionsX = Math.max(64, Math.round(w / 20));
+    const subdivisionsY = Math.max(48, Math.round(h / 20));
+
+    // Create an intermediate canvas to render perspective without transparency issues
+    // This prevents grid seams from showing through when there's transparency on top
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = w;
+    tempCanvas.height = h;
+    const tempCtx = tempCanvas.getContext('2d')!;
+    tempCtx.imageSmoothingEnabled = true;
+    tempCtx.imageSmoothingQuality = 'high';
+
+    for (let j = 0; j < subdivisionsY; j++) {
+      const v0 = j / subdivisionsY;
+      const v1 = (j + 1) / subdivisionsY;
+
+      for (let i = 0; i < subdivisionsX; i++) {
+        const u0 = i / subdivisionsX;
+        const u1 = (i + 1) / subdivisionsX;
+
+        // Source rectangle (no overlap needed with intermediate canvas approach)
+        const sx = u0 * w;
+        const sy = v0 * h;
+        const sw = (u1 - u0) * w;
+        const sh = (v1 - v0) * h;
+
+        // Project corners
+        const tl = project(sx, sy);
+        const tr = project(sx + sw, sy);
+        const bl = project(sx, sy + sh);
+
+        // Compute affine transform for this patch
+        const a = (tr.x - tl.x) / sw;
+        const b = (tr.y - tl.y) / sw;
+        const c = (bl.x - tl.x) / sh;
+        const d = (bl.y - tl.y) / sh;
+        const e = tl.x;
+        const f = tl.y;
+
+        tempCtx.setTransform(a, b, c, d, e, f);
+        // Draw with slight expansion to cover any sub-pixel gaps
+        tempCtx.drawImage(source, sx, sy, sw, sh, -0.5, -0.5, sw + 1, sh + 1);
+      }
+    }
+
+    // Now draw the completed perspective canvas to the final context
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(tempCanvas, 0, 0);
+    ctx.restore();
+  }
+
   private updateAnimationState(timeMs: number): number {
     if (!this.cameraContainer || !this.layoutCache) return 0;
 
@@ -436,7 +658,7 @@ export class FrameRenderer {
   }
 
   private async compositeWithShadows(effectState: CombinedEffectState, timeMs: number): Promise<void> {
-    if (!this.compositeCanvas || !this.compositeCtx || !this.app) return;
+    if (!this.compositeCanvas || !this.compositeCtx || !this.app || !this.screenCanvas || !this.screenCtx) return;
 
     const videoCanvas = this.app.canvas as HTMLCanvasElement;
     const ctx = this.compositeCtx;
@@ -468,23 +690,13 @@ export class FrameRenderer {
       console.warn('[FrameRenderer] No background sprite found during compositing!');
     }
 
-    ctx.save();
-    // Apply perspective-style transform around center
-    ctx.translate(w / 2, h / 2);
-    if (effectState.offsetX || effectState.offsetY) {
-      ctx.translate(effectState.offsetX ?? 0, effectState.offsetY ?? 0);
-    }
-    if (effectState.roll) {
-      ctx.rotate(effectState.roll);
-    }
-    ctx.transform(1, effectState.skewY, effectState.skewX, 1, 0, 0);
-    ctx.scale(effectState.scale ?? 1, effectState.scale ?? 1);
-    ctx.translate(-w / 2, -h / 2);
+    const screenCtx = this.screenCtx;
+    screenCtx.clearRect(0, 0, w, h);
 
     // Midground annotations (between wallpaper and screen)
     if (this.config.annotationRegions && this.config.annotationRegions.length > 0) {
       await renderAnnotations(
-        ctx,
+        screenCtx,
         this.config.annotationRegions,
         this.config.width,
         this.config.height,
@@ -504,17 +716,17 @@ export class FrameRenderer {
       const baseAlpha2 = 0.5 * intensity;
       const baseAlpha3 = 0.3 * intensity;
       const baseOffset = 12 * intensity;
-      ctx.filter = `drop-shadow(0 ${baseOffset}px ${baseBlur1}px rgba(0,0,0,${baseAlpha1})) drop-shadow(0 ${baseOffset/3}px ${baseBlur2}px rgba(0,0,0,${baseAlpha2})) drop-shadow(0 ${baseOffset/6}px ${baseBlur3}px rgba(0,0,0,${baseAlpha3}))`;
+      screenCtx.filter = `drop-shadow(0 ${baseOffset}px ${baseBlur1}px rgba(0,0,0,${baseAlpha1})) drop-shadow(0 ${baseOffset/3}px ${baseBlur2}px rgba(0,0,0,${baseAlpha2})) drop-shadow(0 ${baseOffset/6}px ${baseBlur3}px rgba(0,0,0,${baseAlpha3}))`;
     } else {
-      ctx.filter = 'none';
+      screenCtx.filter = 'none';
     }
 
-    ctx.drawImage(videoCanvas, 0, 0, w, h);
-    ctx.filter = 'none';
+    screenCtx.drawImage(videoCanvas, 0, 0, w, h);
+    screenCtx.filter = 'none';
 
     if (this.config.annotationRegions && this.config.annotationRegions.length > 0) {
       await renderAnnotations(
-        ctx,
+        screenCtx,
         this.config.annotationRegions,
         this.config.width,
         this.config.height,
@@ -524,7 +736,11 @@ export class FrameRenderer {
       );
     }
 
-    ctx.restore();
+    if (effectState.active) {
+      this.drawScreenWithPerspective(ctx, this.screenCanvas, effectState);
+    } else {
+      ctx.drawImage(this.screenCanvas, 0, 0, w, h);
+    }
   }
 
   getCanvas(): HTMLCanvasElement {
@@ -553,5 +769,7 @@ export class FrameRenderer {
     this.shadowCtx = null;
     this.compositeCanvas = null;
     this.compositeCtx = null;
+    this.screenCanvas = null;
+    this.screenCtx = null;
   }
 }

@@ -44,6 +44,121 @@ const ARROW_PATHS: Record<ArrowDirection, string[]> = {
   ],
 };
 
+const IMAGE_CACHE = new Map<string, HTMLImageElement>();
+const IMAGE_PROMISES = new Map<string, Promise<HTMLImageElement>>();
+
+// Cache for animated image decoders
+const ANIMATED_DECODER_CACHE = new Map<string, {
+  decoder: ImageDecoder;
+  frameCount: number;
+  totalDuration: number;
+  frameDurations: number[];
+}>();
+const ANIMATED_DECODER_PROMISES = new Map<string, Promise<{
+  decoder: ImageDecoder;
+  frameCount: number;
+  totalDuration: number;
+  frameDurations: number[];
+} | null>>();
+
+async function getAnimatedDecoder(src: string): Promise<{
+  decoder: ImageDecoder;
+  frameCount: number;
+  totalDuration: number;
+  frameDurations: number[];
+} | null> {
+  // Check if ImageDecoder is supported
+  if (typeof ImageDecoder === 'undefined') {
+    return null;
+  }
+
+  const cached = ANIMATED_DECODER_CACHE.get(src);
+  if (cached) return cached;
+
+  const inflight = ANIMATED_DECODER_PROMISES.get(src);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    try {
+      const response = await fetch(src, { mode: 'cors' });
+      if (!response.ok) return null;
+
+      const contentType = response.headers.get('content-type') || 'image/webp';
+      const data = await response.arrayBuffer();
+
+      const decoder = new ImageDecoder({
+        data,
+        type: contentType,
+      });
+
+      await decoder.tracks.ready;
+      const track = decoder.tracks.selectedTrack;
+      if (!track || track.frameCount <= 1) {
+        decoder.close();
+        return null;
+      }
+
+      // Collect frame durations
+      const frameDurations: number[] = [];
+      let totalDuration = 0;
+
+      for (let i = 0; i < track.frameCount; i++) {
+        const result = await decoder.decode({ frameIndex: i });
+        const duration = result.image.duration ? Number(result.image.duration) / 1000 : 100;
+        frameDurations.push(duration);
+        totalDuration += duration;
+        result.image.close();
+      }
+
+      const info = {
+        decoder,
+        frameCount: track.frameCount,
+        totalDuration,
+        frameDurations,
+      };
+
+      ANIMATED_DECODER_CACHE.set(src, info);
+      ANIMATED_DECODER_PROMISES.delete(src);
+      return info;
+    } catch (error) {
+      console.warn('[AnnotationRenderer] Failed to create animated decoder:', error);
+      ANIMATED_DECODER_PROMISES.delete(src);
+      return null;
+    }
+  })();
+
+  ANIMATED_DECODER_PROMISES.set(src, promise);
+  return promise;
+}
+
+function loadImageCached(src: string): Promise<HTMLImageElement> {
+  const cached = IMAGE_CACHE.get(src);
+  if (cached) return Promise.resolve(cached);
+
+  const inflight = IMAGE_PROMISES.get(src);
+  if (inflight) return inflight;
+
+  const promise = new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    if (src.startsWith('http')) {
+      img.crossOrigin = 'anonymous';
+    }
+    img.onload = () => {
+      IMAGE_CACHE.set(src, img);
+      IMAGE_PROMISES.delete(src);
+      resolve(img);
+    };
+    img.onerror = (err) => {
+      IMAGE_PROMISES.delete(src);
+      reject(err instanceof Error ? err : new Error('Failed to load image'));
+    };
+    img.src = src;
+  });
+
+  IMAGE_PROMISES.set(src, promise);
+  return promise;
+}
+
 function parseSvgPath(pathString: string, scaleX: number, scaleY: number): Array<{ cmd: string; args: number[] }> {
   const commands: Array<{ cmd: string; args: number[] }> = [];
   const parts = pathString.trim().split(/\s+/);
@@ -275,15 +390,82 @@ async function renderImage(
     return;
   }
   
-  return new Promise((resolve) => {
-    const img = new Image();
-    if (src.startsWith('http')) {
-      img.crossOrigin = 'anonymous';
+  try {
+    const img = await loadImageCached(src);
+    ctx.save();
+    // Preserve aspect ratio - contain the image within the bounds
+    const imgAspect = img.width / img.height;
+    const boxAspect = width / height;
+    
+    let drawWidth = width;
+    let drawHeight = height;
+    let drawX = x;
+    let drawY = y;
+    
+    if (imgAspect > boxAspect) {
+      drawHeight = width / imgAspect;
+      drawY = y + (height - drawHeight) / 2;
+    } else {
+      drawWidth = height * imgAspect;
+      drawX = x + (width - drawWidth) / 2;
     }
-    img.onload = () => {
+    
+    ctx.globalAlpha *= alpha;
+    ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+    ctx.restore();
+  } catch (error) {
+    console.error('[AnnotationRenderer] Failed to load image annotation', error);
+  }
+}
+
+async function renderAnimatedEmoji(
+  ctx: CanvasRenderingContext2D,
+  annotation: AnnotationRegion,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  currentTimeMs: number,
+  alpha: number = 1
+): Promise<void> {
+  const src = annotation.content;
+  if (!src) return;
+
+  // Calculate time within the annotation's visible range for animation
+  const annotationStartMs = annotation.startMs ?? 0;
+  const localTimeMs = currentTimeMs - annotationStartMs;
+
+  // Try to get animated decoder first
+  const animInfo = await getAnimatedDecoder(src);
+  
+  if (animInfo && animInfo.frameCount > 1) {
+    try {
+      // Calculate which frame to show based on local time (loop the animation)
+      const loopedTime = localTimeMs % animInfo.totalDuration;
+      
+      // Find the frame index for this time
+      let accumulatedTime = 0;
+      let frameIndex = 0;
+      for (let i = 0; i < animInfo.frameDurations.length; i++) {
+        accumulatedTime += animInfo.frameDurations[i];
+        if (loopedTime < accumulatedTime) {
+          frameIndex = i;
+          break;
+        }
+        frameIndex = i;
+      }
+
+      // Decode the specific frame
+      const result = await animInfo.decoder.decode({ frameIndex });
+      const videoFrame = result.image;
+
       ctx.save();
-      // Preserve aspect ratio - contain the image within the bounds
-      const imgAspect = img.width / img.height;
+      ctx.globalAlpha *= alpha;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      // Calculate aspect ratio and position
+      const imgAspect = videoFrame.displayWidth / videoFrame.displayHeight;
       const boxAspect = width / height;
       
       let drawWidth = width;
@@ -292,25 +474,32 @@ async function renderImage(
       let drawY = y;
       
       if (imgAspect > boxAspect) {
-
         drawHeight = width / imgAspect;
         drawY = y + (height - drawHeight) / 2;
       } else {
         drawWidth = height * imgAspect;
         drawX = x + (width - drawWidth) / 2;
       }
-      
-      ctx.globalAlpha *= alpha;
-      ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+
+      // Draw to a temporary canvas first for better quality scaling
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = videoFrame.displayWidth;
+      tempCanvas.height = videoFrame.displayHeight;
+      const tempCtx = tempCanvas.getContext('2d')!;
+      tempCtx.drawImage(videoFrame as any, 0, 0);
+      videoFrame.close();
+
+      // Draw the temporary canvas with high-quality scaling
+      ctx.drawImage(tempCanvas, drawX, drawY, drawWidth, drawHeight);
       ctx.restore();
-      resolve();
-    };
-    img.onerror = () => {
-      console.error('[AnnotationRenderer] Failed to load image annotation');
-      resolve();
-    };
-    img.src = src;
-  });
+      return;
+    } catch (error) {
+      console.warn('[AnnotationRenderer] Failed to decode animated frame, falling back to static:', error);
+    }
+  }
+
+  // Fallback to static image if animated decoding fails or not supported
+  await renderImage(ctx, annotation, x, y, width, height, alpha);
 }
 
 export async function renderAnnotations(
@@ -362,7 +551,7 @@ export async function renderAnnotations(
         break;
 
       case 'emoji':
-        await renderImage(ctx, annotation, x, y, width, height, alpha);
+        await renderAnimatedEmoji(ctx, annotation, x, y, width, height, currentTimeMs, alpha);
         break;
         
       case 'figure':
