@@ -25,3 +25,4 @@ dist-ssr
 release/**
 
 # npx electron-builder --mac --win
+public/wallpapers/key.md
