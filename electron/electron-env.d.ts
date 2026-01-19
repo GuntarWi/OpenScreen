@@ -39,6 +39,9 @@ interface Window {
     openExternalUrl: (url: string) => Promise<{ success: boolean; error?: string }>
     saveExportedVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{ success: boolean; path?: string; message?: string; cancelled?: boolean }>
     openVideoFilePicker: () => Promise<{ success: boolean; path?: string; cancelled?: boolean }>
+    setCurrentProjectPath: (path: string) => Promise<{ success: boolean }>
+    getCurrentProjectPath: () => Promise<{ success: boolean; path?: string }>
+    clearCurrentProjectPath: () => Promise<{ success: boolean }>
     setCurrentVideoPath: (path: string) => Promise<{ success: boolean }>
     getCurrentVideoPath: () => Promise<{ success: boolean; path?: string }>
     clearCurrentVideoPath: () => Promise<{ success: boolean }>

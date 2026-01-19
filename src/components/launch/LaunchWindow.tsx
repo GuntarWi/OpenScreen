@@ -7,6 +7,7 @@ import { FaRegStopCircle } from "react-icons/fa";
 import { MdMonitor } from "react-icons/md";
 import { RxDragHandleDots2 } from "react-icons/rx";
 import { FaFolderMinus } from "react-icons/fa6";
+import { FaFolderOpen } from "react-icons/fa";
 import { FiMinus, FiX } from "react-icons/fi";
 import { ContentClamp } from "../ui/content-clamp";
 
@@ -79,6 +80,17 @@ export function LaunchWindow() {
       await window.electronAPI.setCurrentVideoPath(result.path);
       await window.electronAPI.switchToEditor();
     }
+  };
+
+  const openProjectFile = async () => {
+    const result = await window.electronAPI.openProjectFilePicker();
+
+    if (result.cancelled || !result.path) {
+      return;
+    }
+
+    await window.electronAPI.setCurrentProjectPath(result.path);
+    await window.electronAPI.switchToEditor();
   };
 
   // IPC events for hide/close
@@ -155,6 +167,19 @@ export function LaunchWindow() {
         >
           <FaFolderMinus size={14} className="text-white" />
           <span className={styles.folderText}>Open</span>
+        </Button>
+
+        <div className="w-px h-6 bg-white/30" />
+
+        <Button
+          variant="link"
+          size="sm"
+          onClick={openProjectFile}
+          className={`gap-1 text-white bg-transparent hover:bg-transparent px-0 flex-1 text-right text-xs ${styles.electronNoDrag} ${styles.folderButton}`}
+          disabled={recording}
+        >
+          <FaFolderOpen size={14} className="text-white" />
+          <span className={styles.folderText}>Project</span>
         </Button>
 
          {/* Separator before hide/close buttons */}

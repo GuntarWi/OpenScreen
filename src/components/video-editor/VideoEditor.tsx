@@ -315,11 +315,37 @@ export default function VideoEditor() {
     return trims.filter(r => r.endMs > r.startMs);
   }, []);
 
+  const loadProjectFromPath = useCallback(async (projectPath: string) => {
+    const loadResult = await window.electronAPI.loadProject(projectPath);
+
+    if (!loadResult.success || !loadResult.data) {
+      toast.error(loadResult.message || 'Failed to load project');
+      return false;
+    }
+
+    const success = await deserializeProject(loadResult.data);
+
+    if (success) {
+      setCurrentProjectPath(projectPath);
+      setError(null);
+    }
+
+    return success;
+  }, [deserializeProject]);
+
   useEffect(() => {
     async function loadVideo() {
       try {
+        const pendingProject = await window.electronAPI.getCurrentProjectPath?.();
+        if (pendingProject?.success && pendingProject.path) {
+          const loaded = await loadProjectFromPath(pendingProject.path);
+          await window.electronAPI.clearCurrentProjectPath?.();
+          if (loaded) {
+            return;
+          }
+        }
+
         const result = await window.electronAPI.getCurrentVideoPath();
-        
         if (result.success && result.path) {
           const videoUrl = toFileUrl(result.path);
           setVideoPath(videoUrl);
@@ -334,7 +360,7 @@ export default function VideoEditor() {
       }
     }
     loadVideo();
-  }, []);
+  }, [loadProjectFromPath]);
 
   // Reset clip segments when a new video loads or duration changes from zero to a real value
   useEffect(() => {
@@ -1269,20 +1295,8 @@ export default function VideoEditor() {
     if (pickerResult.cancelled || !pickerResult.path) {
       return;
     }
-
-    const loadResult = await window.electronAPI.loadProject(pickerResult.path);
-
-    if (!loadResult.success || !loadResult.data) {
-      toast.error(loadResult.message || 'Failed to load project');
-      return;
-    }
-
-    const success = await deserializeProject(loadResult.data);
-
-    if (success) {
-      setCurrentProjectPath(pickerResult.path);
-    }
-  }, [deserializeProject]);
+    await loadProjectFromPath(pickerResult.path);
+  }, [loadProjectFromPath]);
 
   const handleNewProject = useCallback(async () => {
     // Open video file picker

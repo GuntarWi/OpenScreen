@@ -67,6 +67,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openVideoFilePicker: () => {
     return ipcRenderer.invoke('open-video-file-picker')
   },
+  openProjectFilePicker: () => {
+    return ipcRenderer.invoke('open-project-file-picker')
+  },
+  setCurrentProjectPath: (path: string) => {
+    return ipcRenderer.invoke('set-current-project-path', path)
+  },
+  getCurrentProjectPath: () => {
+    return ipcRenderer.invoke('get-current-project-path')
+  },
+  clearCurrentProjectPath: () => {
+    return ipcRenderer.invoke('clear-current-project-path')
+  },
   setCurrentVideoPath: (path: string) => {
     return ipcRenderer.invoke('set-current-video-path', path)
   },
@@ -87,9 +99,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   loadProject: (projectPath: string) => {
     return ipcRenderer.invoke('load-project', projectPath)
-  },
-  openProjectFilePicker: () => {
-    return ipcRenderer.invoke('open-project-file-picker')
   },
   checkVideoFileExists: (videoPath: string) => {
     return ipcRenderer.invoke('check-video-file-exists', videoPath)

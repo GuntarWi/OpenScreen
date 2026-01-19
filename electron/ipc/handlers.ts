@@ -390,6 +390,7 @@ export function registerIpcHandlers(
   });
 
   let currentVideoPath: string | null = null;
+  let currentProjectPath: string | null = null;
 
   ipcMain.handle('set-current-video-path', (_, path: string) => {
     currentVideoPath = path;
@@ -402,6 +403,20 @@ export function registerIpcHandlers(
 
   ipcMain.handle('clear-current-video-path', () => {
     currentVideoPath = null;
+    return { success: true };
+  });
+
+  ipcMain.handle('set-current-project-path', (_, path: string) => {
+    currentProjectPath = path;
+    return { success: true };
+  });
+
+  ipcMain.handle('get-current-project-path', () => {
+    return currentProjectPath ? { success: true, path: currentProjectPath } : { success: false };
+  });
+
+  ipcMain.handle('clear-current-project-path', () => {
+    currentProjectPath = null;
     return { success: true };
   });
 
