@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectSource: (source: any) => {
     return ipcRenderer.invoke('select-source', source)
   },
+  quitApp: () => {
+    return ipcRenderer.invoke('quit-app')
+  },
   getSelectedSource: () => {
     return ipcRenderer.invoke('get-selected-source')
   },
@@ -78,5 +81,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getSourceBounds: () => {
     return ipcRenderer.invoke('get-source-bounds')
+  },
+  saveProject: (projectData: string, suggestedFileName: string) => {
+    return ipcRenderer.invoke('save-project', projectData, suggestedFileName)
+  },
+  loadProject: (projectPath: string) => {
+    return ipcRenderer.invoke('load-project', projectPath)
+  },
+  openProjectFilePicker: () => {
+    return ipcRenderer.invoke('open-project-file-picker')
+  },
+  checkVideoFileExists: (videoPath: string) => {
+    return ipcRenderer.invoke('check-video-file-exists', videoPath)
   },
 })

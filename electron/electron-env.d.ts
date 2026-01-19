@@ -28,6 +28,7 @@ interface Window {
     switchToEditor: () => Promise<void>
     openSourceSelector: () => Promise<void>
     selectSource: (source: any) => Promise<any>
+    quitApp: () => Promise<{ success: boolean }>
     getSelectedSource: () => Promise<any>
     storeRecordedVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{ success: boolean; path?: string; message?: string }>
     storeCursorData: (videoPath: string, cursorData: unknown) => Promise<{ success: boolean; path?: string; message?: string; error?: string }>
@@ -44,6 +45,31 @@ interface Window {
     getPlatform: () => Promise<string>
     hudOverlayHide: () => void;
     hudOverlayClose: () => void;
+    saveProject: (projectData: string, suggestedFileName: string) => Promise<{
+      success: boolean;
+      path?: string;
+      message?: string;
+      cancelled?: boolean;
+      error?: string;
+    }>
+    loadProject: (projectPath: string) => Promise<{
+      success: boolean;
+      path?: string;
+      data?: string;
+      message?: string;
+      error?: string;
+    }>
+    openProjectFilePicker: () => Promise<{
+      success: boolean;
+      path?: string;
+      cancelled?: boolean;
+      message?: string;
+      error?: string;
+    }>
+    checkVideoFileExists: (videoPath: string) => Promise<{
+      success: boolean;
+      exists?: boolean;
+    }>
   }
 }
 

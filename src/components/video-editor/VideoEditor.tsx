@@ -10,6 +10,7 @@ import PlaybackControls from "./PlaybackControls";
 import TimelineEditor from "./timeline/TimelineEditor";
 import { SettingsPanel } from "./SettingsPanel";
 import { ExportDialog } from "./ExportDialog";
+import { ProjectToolbar } from "./ProjectToolbar";
 
 import type { Span } from "dnd-timeline";
 import {
@@ -88,6 +89,11 @@ export default function VideoEditor() {
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
   const [exportQuality, setExportQuality] = useState<ExportQuality>('good');
 
+  // Project save/load state
+  const [currentProjectPath, setCurrentProjectPath] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
   const nextZoomIdRef = useRef(1);
   const nextClipIdRef = useRef(1);
@@ -102,17 +108,174 @@ export default function VideoEditor() {
   const toFileUrl = (filePath: string): string => {
     // Normalize path separators to forward slashes
     const normalized = filePath.replace(/\\/g, '/');
-    
+
     // Check if it's a Windows absolute path (e.g., C:/Users/...)
     if (normalized.match(/^[a-zA-Z]:/)) {
       const fileUrl = `file:///${normalized}`;
       return fileUrl;
     }
-    
+
     // Unix-style absolute path
     const fileUrl = `file://${normalized}`;
     return fileUrl;
   };
+
+  // Helper to get filename from path (browser-safe)
+  const getBasename = (filePath: string): string => {
+    const normalized = filePath.replace(/\\/g, '/');
+    const parts = normalized.split('/');
+    return parts[parts.length - 1];
+  };
+
+  // Helper to remove file extension
+  const removeExtension = (filename: string): string => {
+    const lastDot = filename.lastIndexOf('.');
+    return lastDot > 0 ? filename.substring(0, lastDot) : filename;
+  };
+
+  // Serialize project state to JSON
+  const serializeProject = useCallback((): string => {
+    const project = {
+      version: "1.0.0",
+      savedAt: new Date().toISOString(),
+      videoReference: {
+        path: videoFilePath || '',
+        filename: videoFilePath ? getBasename(videoFilePath) : '',
+        duration: duration
+      },
+
+      // Timeline & Editing
+      clipSegments,
+      zoomRegions,
+      effectRegions,
+      annotationRegions,
+
+      // Cursor Data
+      cursorTrack,
+      cursorEnabled,
+      cursorSmoothing,
+      quadraticSmoothingStrength,
+      end2endParams,
+
+      // Visual Settings
+      wallpaper,
+      shadowIntensity,
+      showBlur,
+      motionBlurEnabled,
+      borderRadius,
+      padding,
+      cropRegion,
+
+      // Export Settings
+      aspectRatio,
+      exportQuality,
+
+      // ID Counters
+      idCounters: {
+        nextZoomId: nextZoomIdRef.current,
+        nextClipId: nextClipIdRef.current,
+        nextTrimId: nextTrimIdRef.current,
+        nextEffectId: nextEffectIdRef.current,
+        nextAnnotationId: nextAnnotationIdRef.current,
+        nextAnnotationZIndex: nextAnnotationZIndexRef.current
+      }
+    };
+
+    return JSON.stringify(project, null, 2);
+  }, [
+    videoFilePath, duration, clipSegments, zoomRegions, effectRegions,
+    annotationRegions, cursorTrack, cursorEnabled, cursorSmoothing,
+    quadraticSmoothingStrength, end2endParams, wallpaper, shadowIntensity,
+    showBlur, motionBlurEnabled, borderRadius, padding, cropRegion,
+    aspectRatio, exportQuality
+  ]);
+
+  // Deserialize project state from JSON
+  const deserializeProject = useCallback(async (projectData: string): Promise<boolean> => {
+    try {
+      const project: any = JSON.parse(projectData);
+
+      // Validate version
+      if (project.version !== "1.0.0") {
+        toast.error(`Unsupported project version: ${project.version}`);
+        return false;
+      }
+
+      // Check video exists
+      const videoCheck = await window.electronAPI.checkVideoFileExists(project.videoReference.path);
+      if (!videoCheck.exists) {
+        toast.error(
+          `Video file not found: ${project.videoReference.filename}. Please locate the video file.`,
+          { duration: 6000 }
+        );
+
+        // Open file picker to locate video
+        const pickerResult = await window.electronAPI.openVideoFilePicker();
+        if (!pickerResult.success || !pickerResult.path) {
+          return false;
+        }
+
+        // Update video reference
+        project.videoReference.path = pickerResult.path;
+      }
+
+      // Set video path
+      await window.electronAPI.setCurrentVideoPath(project.videoReference.path);
+      setVideoFilePath(project.videoReference.path);
+      setVideoPath(toFileUrl(project.videoReference.path));
+
+      // Restore timeline state
+      setClipSegments(project.clipSegments || []);
+      setZoomRegions(project.zoomRegions || []);
+      setEffectRegions(project.effectRegions || []);
+      setAnnotationRegions(project.annotationRegions || []);
+
+      // Restore cursor data
+      setCursorTrack(project.cursorTrack);
+      setCursorEnabled(project.cursorEnabled ?? true);
+      setCursorSmoothing(project.cursorSmoothing || 'none');
+      setQuadraticSmoothingStrength(project.quadraticSmoothingStrength ?? 0.5);
+      setEnd2endParams(project.end2endParams || {
+        dwellTimeMs: 300,
+        stillEpsilonPx: 3,
+        minJumpDistancePx: 18,
+        minTimeBetweenEndpointsMs: 200,
+        arrivalFraction: 0.6,
+      });
+
+      // Restore visual settings
+      setWallpaper(project.wallpaper || '/wallpapers/wallpaper1.jpg');
+      setShadowIntensity(project.shadowIntensity ?? 0);
+      setShowBlur(project.showBlur ?? false);
+      setMotionBlurEnabled(project.motionBlurEnabled ?? true);
+      setBorderRadius(project.borderRadius ?? 0);
+      setPadding(project.padding ?? 50);
+      setCropRegion(project.cropRegion || DEFAULT_CROP_REGION);
+
+      // Restore export settings
+      setAspectRatio(project.aspectRatio || '16:9');
+      setExportQuality(project.exportQuality || 'good');
+
+      // Restore ID counters
+      if (project.idCounters) {
+        nextZoomIdRef.current = project.idCounters.nextZoomId;
+        nextClipIdRef.current = project.idCounters.nextClipId;
+        nextTrimIdRef.current = project.idCounters.nextTrimId;
+        nextEffectIdRef.current = project.idCounters.nextEffectId;
+        nextAnnotationIdRef.current = project.idCounters.nextAnnotationId;
+        nextAnnotationZIndexRef.current = project.idCounters.nextAnnotationZIndex;
+      }
+
+      setHasUnsavedChanges(false);
+      toast.success('Project loaded successfully');
+      return true;
+
+    } catch (error) {
+      console.error('Failed to deserialize project:', error);
+      toast.error(`Failed to load project: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return false;
+    }
+  }, [toFileUrl]);
 
   const computeTrimRegionsFromSegments = useCallback((segments: ClipSegment[], totalMs: number): TrimRegion[] => {
     if (totalMs <= 0) return [];
@@ -263,6 +426,57 @@ export default function VideoEditor() {
     })();
     return () => { mounted = false };
   }, []);
+
+  // Track changes for unsaved changes indicator
+  useEffect(() => {
+    // Skip if no video loaded yet
+    if (!videoPath) return;
+
+    // Mark as having unsaved changes whenever state changes
+    setHasUnsavedChanges(true);
+  }, [
+    videoPath, clipSegments, zoomRegions, effectRegions, annotationRegions,
+    cursorTrack, cursorEnabled, cursorSmoothing, wallpaper,
+    shadowIntensity, showBlur, motionBlurEnabled, borderRadius,
+    padding, cropRegion, aspectRatio, exportQuality
+  ]);
+
+  // Auto-save functionality
+  useEffect(() => {
+    if (!autoSaveEnabled || !currentProjectPath || !hasUnsavedChanges) {
+      return;
+    }
+
+    // Auto-save after 30 seconds of inactivity
+    const timer = setTimeout(async () => {
+      const projectData = serializeProject();
+      const result = await window.electronAPI.saveProject(
+        projectData,
+        getBasename(currentProjectPath)
+      );
+
+      if (result.success) {
+        setHasUnsavedChanges(false);
+        toast.info('Auto-saved', { duration: 2000 });
+      }
+    }, 30000);
+
+    return () => clearTimeout(timer);
+  }, [autoSaveEnabled, currentProjectPath, hasUnsavedChanges, serializeProject]);
+
+  // Warn before closing with unsaved changes
+  useEffect(() => {
+    if (window.electronAPI) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = ''; // Shows browser confirmation dialog
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   function togglePlayPause() {
     const playback = videoPlaybackRef.current;
@@ -1022,6 +1236,116 @@ export default function VideoEditor() {
     }
   }, []);
 
+  // Project save/load handlers
+  const handleSaveProject = useCallback(async () => {
+    const projectData = serializeProject();
+
+    // Generate suggested filename
+    const timestamp = new Date().toISOString().split('T')[0];
+    const videoName = videoFilePath
+      ? removeExtension(getBasename(videoFilePath))
+      : 'untitled';
+    const suggestedFileName = `${videoName}-${timestamp}.openscreen`;
+
+    const result = await window.electronAPI.saveProject(projectData, suggestedFileName);
+
+    if (result.cancelled) {
+      toast.info('Save cancelled');
+      return;
+    }
+
+    if (result.success && result.path) {
+      setCurrentProjectPath(result.path);
+      setHasUnsavedChanges(false);
+      toast.success(`Project saved to ${getBasename(result.path)}`);
+    } else {
+      toast.error(result.message || 'Failed to save project');
+    }
+  }, [serializeProject, videoFilePath]);
+
+  const handleLoadProject = useCallback(async () => {
+    const pickerResult = await window.electronAPI.openProjectFilePicker();
+
+    if (pickerResult.cancelled || !pickerResult.path) {
+      return;
+    }
+
+    const loadResult = await window.electronAPI.loadProject(pickerResult.path);
+
+    if (!loadResult.success || !loadResult.data) {
+      toast.error(loadResult.message || 'Failed to load project');
+      return;
+    }
+
+    const success = await deserializeProject(loadResult.data);
+
+    if (success) {
+      setCurrentProjectPath(pickerResult.path);
+    }
+  }, [deserializeProject]);
+
+  const handleNewProject = useCallback(async () => {
+    // Open video file picker
+    const pickerResult = await window.electronAPI.openVideoFilePicker();
+
+    if (!pickerResult.success || !pickerResult.path) {
+      return;
+    }
+
+    // Set video path
+    await window.electronAPI.setCurrentVideoPath(pickerResult.path);
+    setVideoFilePath(pickerResult.path);
+    setVideoPath(toFileUrl(pickerResult.path));
+
+    // Reset all editing state
+    setClipSegments([]);
+    setZoomRegions([]);
+    setEffectRegions([]);
+    setAnnotationRegions([]);
+    setCursorTrack(null);
+    setCurrentProjectPath(null);
+    setHasUnsavedChanges(false);
+
+    // Reset ID counters
+    nextZoomIdRef.current = 1;
+    nextClipIdRef.current = 1;
+    nextTrimIdRef.current = 1;
+    nextEffectIdRef.current = 1;
+    nextAnnotationIdRef.current = 1;
+    nextAnnotationZIndexRef.current = 1;
+
+    toast.success('New project created');
+  }, [toFileUrl]);
+
+  // Keyboard shortcuts for project operations
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl + S: Save
+      if ((e.metaKey || e.ctrlKey) && e.key === 's' && !e.shiftKey) {
+        e.preventDefault();
+        handleSaveProject();
+      }
+      // Cmd/Ctrl + Shift + S: Save As
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 's') {
+        e.preventDefault();
+        handleSaveProject(); // Always shows dialog
+      }
+      // Cmd/Ctrl + O: Open
+      if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
+        e.preventDefault();
+        handleLoadProject();
+      }
+      // Cmd/Ctrl + N: New
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        handleNewProject();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSaveProject, handleLoadProject, handleNewProject]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
@@ -1040,10 +1364,20 @@ export default function VideoEditor() {
 
   return (
     <div className="flex flex-col h-screen bg-[#09090b] text-slate-200 overflow-hidden selection:bg-[#34B27B]/30">
-      <div 
-        className="h-10 flex-shrink-0 bg-[#09090b]/80 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-6 z-50"
+      <div
+        className="h-10 flex-shrink-0 bg-[#09090b]/80 backdrop-blur-md border-b border-white/5 flex items-center justify-between pl-20 pr-6 z-50"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
+        <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <ProjectToolbar
+            onSaveProject={handleSaveProject}
+            onSaveProjectAs={handleSaveProject}
+            onLoadProject={handleLoadProject}
+            onNewProject={handleNewProject}
+            hasUnsavedChanges={hasUnsavedChanges}
+            currentProjectPath={currentProjectPath}
+          />
+        </div>
         <div className="flex-1" />
       </div>
 

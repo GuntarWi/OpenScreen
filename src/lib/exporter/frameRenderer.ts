@@ -55,6 +55,8 @@ export class FrameRenderer {
   private compositeCtx: CanvasRenderingContext2D | null = null;
   private screenCanvas: HTMLCanvasElement | null = null;
   private screenCtx: CanvasRenderingContext2D | null = null;
+  private effectCanvas: HTMLCanvasElement | null = null;
+  private effectCtx: CanvasRenderingContext2D | null = null;
   private config: FrameRenderConfig;
   private animationState: AnimationState;
   private layoutCache: any = null;
@@ -132,6 +134,16 @@ export class FrameRenderer {
 
     if (!this.screenCtx) {
       throw new Error('Failed to get 2D context for screen canvas');
+    }
+
+    // Setup effect canvas for post-perspective shadow compositing
+    this.effectCanvas = document.createElement('canvas');
+    this.effectCanvas.width = this.config.width;
+    this.effectCanvas.height = this.config.height;
+    this.effectCtx = this.effectCanvas.getContext('2d', { willReadFrequently: false });
+
+    if (!this.effectCtx) {
+      throw new Error('Failed to get 2D context for effect canvas');
     }
 
     // Setup shadow canvas if needed
@@ -521,6 +533,33 @@ export class FrameRenderer {
     };
   }
 
+  private computeAffineFromTriangles(
+    sx0: number,
+    sy0: number,
+    sx1: number,
+    sy1: number,
+    sx2: number,
+    sy2: number,
+    dx0: number,
+    dy0: number,
+    dx1: number,
+    dy1: number,
+    dx2: number,
+    dy2: number
+  ): { a: number; b: number; c: number; d: number; e: number; f: number } | null {
+    const det = sx0 * (sy1 - sy2) + sx1 * (sy2 - sy0) + sx2 * (sy0 - sy1);
+    if (Math.abs(det) < 1e-8) return null;
+
+    const a = (dx0 * (sy1 - sy2) + dx1 * (sy2 - sy0) + dx2 * (sy0 - sy1)) / det;
+    const b = (dy0 * (sy1 - sy2) + dy1 * (sy2 - sy0) + dy2 * (sy0 - sy1)) / det;
+    const c = (dx0 * (sx2 - sx1) + dx1 * (sx0 - sx2) + dx2 * (sx1 - sx0)) / det;
+    const d = (dy0 * (sx2 - sx1) + dy1 * (sx0 - sx2) + dy2 * (sx1 - sx0)) / det;
+    const e = (dx0 * (sx1 * sy2 - sx2 * sy1) + dx1 * (sx2 * sy0 - sx0 * sy2) + dx2 * (sx0 * sy1 - sx1 * sy0)) / det;
+    const f = (dy0 * (sx1 * sy2 - sx2 * sy1) + dy1 * (sx2 * sy0 - sx0 * sy2) + dy2 * (sx0 * sy1 - sx1 * sy0)) / det;
+
+    return { a, b, c, d, e, f };
+  }
+
   private drawScreenWithPerspective(
     ctx: CanvasRenderingContext2D,
     source: HTMLCanvasElement,
@@ -541,8 +580,41 @@ export class FrameRenderer {
 
     // Use a 2D grid of patches for proper perspective in both X and Y directions
     // Each grid point is projected using the full 3D matrix for accurate perspective
-    const subdivisionsX = Math.max(64, Math.round(w / 20));
-    const subdivisionsY = Math.max(48, Math.round(h / 20));
+    // Minimal subdivisions to eliminate visible seam lines (8x6 grid = only 48 patches)
+    const subdivisionsX = Math.max(8, Math.round(w / 160));
+    const subdivisionsY = Math.max(6, Math.round(h / 160));
+    const xCoords = new Array(subdivisionsX + 1);
+    const yCoords = new Array(subdivisionsY + 1);
+    for (let i = 0; i <= subdivisionsX; i++) {
+      xCoords[i] = Math.round((i / subdivisionsX) * w);
+    }
+    for (let j = 0; j <= subdivisionsY; j++) {
+      yCoords[j] = Math.round((j / subdivisionsY) * h);
+    }
+    xCoords[subdivisionsX] = w;
+    yCoords[subdivisionsY] = h;
+    const bleed = Math.min(3, Math.max(1, Math.round(Math.max(w, h) / 800)));
+    const clipPad = Math.max(0.35, Math.min(1.25, bleed * 0.6));
+
+    const expandTriangle = (
+      p0: { x: number; y: number },
+      p1: { x: number; y: number },
+      p2: { x: number; y: number }
+    ) => {
+      const cx = (p0.x + p1.x + p2.x) / 3;
+      const cy = (p0.y + p1.y + p2.y) / 3;
+
+      const expand = (p: { x: number; y: number }) => {
+        const vx = p.x - cx;
+        const vy = p.y - cy;
+        const len = Math.hypot(vx, vy);
+        if (len <= 0) return p;
+        const scale = (len + clipPad) / len;
+        return { x: cx + vx * scale, y: cy + vy * scale };
+      };
+
+      return [expand(p0), expand(p1), expand(p2)];
+    };
 
     // Create an intermediate canvas to render perspective without transparency issues
     // This prevents grid seams from showing through when there's transparency on top
@@ -550,39 +622,81 @@ export class FrameRenderer {
     tempCanvas.width = w;
     tempCanvas.height = h;
     const tempCtx = tempCanvas.getContext('2d')!;
+
+    // Enable high-quality smoothing during patch rendering to maintain quality with zoom+perspective
     tempCtx.imageSmoothingEnabled = true;
     tempCtx.imageSmoothingQuality = 'high';
 
     for (let j = 0; j < subdivisionsY; j++) {
-      const v0 = j / subdivisionsY;
-      const v1 = (j + 1) / subdivisionsY;
-
       for (let i = 0; i < subdivisionsX; i++) {
-        const u0 = i / subdivisionsX;
-        const u1 = (i + 1) / subdivisionsX;
-
-        // Source rectangle (no overlap needed with intermediate canvas approach)
-        const sx = u0 * w;
-        const sy = v0 * h;
-        const sw = (u1 - u0) * w;
-        const sh = (v1 - v0) * h;
+        const sx = xCoords[i];
+        const sy = yCoords[j];
+        const sx1 = xCoords[i + 1];
+        const sy1 = yCoords[j + 1];
+        const sw = sx1 - sx;
+        const sh = sy1 - sy;
+        if (sw <= 0 || sh <= 0) continue;
 
         // Project corners
         const tl = project(sx, sy);
-        const tr = project(sx + sw, sy);
-        const bl = project(sx, sy + sh);
+        const tr = project(sx1, sy);
+        const bl = project(sx, sy1);
+        const br = project(sx1, sy1);
 
-        // Compute affine transform for this patch
-        const a = (tr.x - tl.x) / sw;
-        const b = (tr.y - tl.y) / sw;
-        const c = (bl.x - tl.x) / sh;
-        const d = (bl.y - tl.y) / sh;
-        const e = tl.x;
-        const f = tl.y;
+        // Bleed source pixels to avoid seams while clipping to the projected patch.
+        const padLeft = Math.min(bleed, sx);
+        const padTop = Math.min(bleed, sy);
+        const padRight = Math.min(bleed, w - sx1);
+        const padBottom = Math.min(bleed, h - sy1);
+        const sxPad = sx - padLeft;
+        const syPad = sy - padTop;
+        const swPad = sw + padLeft + padRight;
+        const shPad = sh + padTop + padBottom;
 
-        tempCtx.setTransform(a, b, c, d, e, f);
-        // Draw with slight expansion to cover any sub-pixel gaps
-        tempCtx.drawImage(source, sx, sy, sw, sh, -0.5, -0.5, sw + 1, sh + 1);
+        const drawTriangle = (
+          sx0: number,
+          sy0: number,
+          sx1t: number,
+          sy1t: number,
+          sx2: number,
+          sy2: number,
+          d0: { x: number; y: number },
+          d1: { x: number; y: number },
+          d2: { x: number; y: number }
+        ) => {
+          const matrix = this.computeAffineFromTriangles(
+            sx0,
+            sy0,
+            sx1t,
+            sy1t,
+            sx2,
+            sy2,
+            d0.x,
+            d0.y,
+            d1.x,
+            d1.y,
+            d2.x,
+            d2.y
+          );
+          if (!matrix) return;
+
+          const [p0, p1, p2] = expandTriangle(d0, d1, d2);
+          tempCtx.save();
+          tempCtx.setTransform(1, 0, 0, 1, 0, 0);
+          tempCtx.beginPath();
+          tempCtx.moveTo(p0.x, p0.y);
+          tempCtx.lineTo(p1.x, p1.y);
+          tempCtx.lineTo(p2.x, p2.y);
+          tempCtx.closePath();
+          tempCtx.clip();
+
+          tempCtx.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
+          tempCtx.drawImage(source, sxPad, syPad, swPad, shPad, -padLeft, -padTop, swPad, shPad);
+          tempCtx.restore();
+        };
+
+        drawTriangle(0, 0, sw, 0, 0, sh, tl, tr, bl);
+        drawTriangle(sw, sh, sw, 0, 0, sh, br, tr, bl);
       }
     }
 
@@ -658,7 +772,7 @@ export class FrameRenderer {
   }
 
   private async compositeWithShadows(effectState: CombinedEffectState, timeMs: number): Promise<void> {
-    if (!this.compositeCanvas || !this.compositeCtx || !this.app || !this.screenCanvas || !this.screenCtx) return;
+    if (!this.compositeCanvas || !this.compositeCtx || !this.app || !this.screenCanvas || !this.screenCtx || !this.effectCanvas || !this.effectCtx) return;
 
     const videoCanvas = this.app.canvas as HTMLCanvasElement;
     const ctx = this.compositeCtx;
@@ -674,6 +788,10 @@ export class FrameRenderer {
 
     // Clear composite canvas
     ctx.clearRect(0, 0, w, h);
+    
+    // Enable high-quality smoothing for final composite
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     // Draw background layer (without effect transforms)
     if (this.backgroundSprite) {
@@ -692,6 +810,10 @@ export class FrameRenderer {
 
     const screenCtx = this.screenCtx;
     screenCtx.clearRect(0, 0, w, h);
+    
+    // Enable high-quality smoothing for border radius and shadow rendering
+    screenCtx.imageSmoothingEnabled = true;
+    screenCtx.imageSmoothingQuality = 'high';
 
     // Midground annotations (between wallpaper and screen)
     if (this.config.annotationRegions && this.config.annotationRegions.length > 0) {
@@ -707,20 +829,7 @@ export class FrameRenderer {
     }
 
     // Draw video with optional shadow
-    if (this.config.showShadow && this.config.shadowIntensity > 0) {
-      const intensity = this.config.shadowIntensity;
-      const baseBlur1 = 48 * intensity;
-      const baseBlur2 = 16 * intensity;
-      const baseBlur3 = 8 * intensity;
-      const baseAlpha1 = 0.7 * intensity;
-      const baseAlpha2 = 0.5 * intensity;
-      const baseAlpha3 = 0.3 * intensity;
-      const baseOffset = 12 * intensity;
-      screenCtx.filter = `drop-shadow(0 ${baseOffset}px ${baseBlur1}px rgba(0,0,0,${baseAlpha1})) drop-shadow(0 ${baseOffset/3}px ${baseBlur2}px rgba(0,0,0,${baseAlpha2})) drop-shadow(0 ${baseOffset/6}px ${baseBlur3}px rgba(0,0,0,${baseAlpha3}))`;
-    } else {
-      screenCtx.filter = 'none';
-    }
-
+    screenCtx.filter = 'none';
     screenCtx.drawImage(videoCanvas, 0, 0, w, h);
     screenCtx.filter = 'none';
 
@@ -736,10 +845,30 @@ export class FrameRenderer {
       );
     }
 
+    let finalScreen = this.screenCanvas;
     if (effectState.active) {
-      this.drawScreenWithPerspective(ctx, this.screenCanvas, effectState);
+      const effectCtx = this.effectCtx;
+      effectCtx.setTransform(1, 0, 0, 1, 0, 0);
+      effectCtx.clearRect(0, 0, w, h);
+      this.drawScreenWithPerspective(effectCtx, this.screenCanvas, effectState);
+      finalScreen = this.effectCanvas;
+    }
+
+    if (this.config.showShadow && this.config.shadowIntensity > 0) {
+      const intensity = this.config.shadowIntensity;
+      const baseBlur1 = 48 * intensity;
+      const baseBlur2 = 16 * intensity;
+      const baseBlur3 = 8 * intensity;
+      const baseAlpha1 = 0.7 * intensity;
+      const baseAlpha2 = 0.5 * intensity;
+      const baseAlpha3 = 0.3 * intensity;
+      const baseOffset = 12 * intensity;
+      ctx.save();
+      ctx.filter = `drop-shadow(0 ${baseOffset}px ${baseBlur1}px rgba(0,0,0,${baseAlpha1})) drop-shadow(0 ${baseOffset/3}px ${baseBlur2}px rgba(0,0,0,${baseAlpha2})) drop-shadow(0 ${baseOffset/6}px ${baseBlur3}px rgba(0,0,0,${baseAlpha3}))`;
+      ctx.drawImage(finalScreen, 0, 0, w, h);
+      ctx.restore();
     } else {
-      ctx.drawImage(this.screenCanvas, 0, 0, w, h);
+      ctx.drawImage(finalScreen, 0, 0, w, h);
     }
   }
 
@@ -771,5 +900,7 @@ export class FrameRenderer {
     this.compositeCtx = null;
     this.screenCanvas = null;
     this.screenCtx = null;
+    this.effectCanvas = null;
+    this.effectCtx = null;
   }
 }

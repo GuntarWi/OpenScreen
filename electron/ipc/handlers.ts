@@ -51,6 +51,11 @@ export function registerIpcHandlers(
     createSourceSelectorWindow()
   })
 
+  ipcMain.handle('quit-app', () => {
+    app.quit()
+    return { success: true }
+  })
+
   ipcMain.handle('switch-to-editor', () => {
     const mainWin = getMainWindow()
     if (mainWin) {
@@ -103,7 +108,95 @@ export function registerIpcHandlers(
     }
   })
 
+  // Project file handlers
+  ipcMain.handle('save-project', async (_, projectData: string, suggestedFileName: string) => {
+    try {
+      const mainWindow = getMainWindow();
+      const result = await dialog.showSaveDialog(
+        mainWindow || undefined,
+        {
+          title: 'Save OpenScreen Project',
+          defaultPath: path.join(app.getPath('documents'), suggestedFileName),
+          filters: [
+            { name: 'OpenScreen Project', extensions: ['openscreen'] }
+          ],
+          properties: ['createDirectory', 'showOverwriteConfirmation']
+        }
+      );
 
+      if (result.canceled || !result.filePath) {
+        return { success: false, cancelled: true, message: 'Save cancelled' };
+      }
+
+      await fs.writeFile(result.filePath, projectData, 'utf-8');
+
+      return {
+        success: true,
+        path: result.filePath,
+        message: 'Project saved successfully'
+      };
+    } catch (error) {
+      console.error('Failed to save project:', error);
+      return {
+        success: false,
+        message: 'Failed to save project',
+        error: String(error)
+      };
+    }
+  });
+
+  ipcMain.handle('load-project', async (_, projectPath: string) => {
+    try {
+      const data = await fs.readFile(projectPath, 'utf-8');
+      return { success: true, path: projectPath, data };
+    } catch (error) {
+      console.error('Failed to load project:', error);
+      return {
+        success: false,
+        message: 'Failed to load project file',
+        error: String(error)
+      };
+    }
+  });
+
+  ipcMain.handle('open-project-file-picker', async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: 'Open OpenScreen Project',
+        defaultPath: app.getPath('documents'),
+        filters: [
+          { name: 'OpenScreen Project', extensions: ['openscreen'] },
+          { name: 'All Files', extensions: ['*'] }
+        ],
+        properties: ['openFile']
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, cancelled: true };
+      }
+
+      return {
+        success: true,
+        path: result.filePaths[0]
+      };
+    } catch (error) {
+      console.error('Failed to open project picker:', error);
+      return {
+        success: false,
+        message: 'Failed to open project picker',
+        error: String(error)
+      };
+    }
+  });
+
+  ipcMain.handle('check-video-file-exists', async (_, videoPath: string) => {
+    try {
+      await fs.access(videoPath);
+      return { success: true, exists: true };
+    } catch (error) {
+      return { success: true, exists: false };
+    }
+  });
 
   ipcMain.handle('get-recorded-video-path', async () => {
     try {
@@ -229,14 +322,18 @@ export function registerIpcHandlers(
 
   ipcMain.handle('save-exported-video', async (_, videoData: ArrayBuffer, fileName: string) => {
     try {
-      const result = await dialog.showSaveDialog({
-        title: 'Save Exported Video',
-        defaultPath: path.join(app.getPath('downloads'), fileName),
-        filters: [
-          { name: 'MP4 Video', extensions: ['mp4'] }
-        ],
-        properties: ['createDirectory', 'showOverwriteConfirmation']
-      });
+      const mainWindow = getMainWindow();
+      const result = await dialog.showSaveDialog(
+        mainWindow || undefined,
+        {
+          title: 'Save Exported Video',
+          defaultPath: path.join(app.getPath('downloads'), fileName),
+          filters: [
+            { name: 'MP4 Video', extensions: ['mp4'] }
+          ],
+          properties: ['createDirectory', 'showOverwriteConfirmation']
+        }
+      );
 
       if (result.canceled || !result.filePath) {
         return {

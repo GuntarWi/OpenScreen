@@ -159,9 +159,19 @@ function createSourceSelectorWindowWrapper() {
 }
 
 // On macOS, applications and their menu bar stay active until the user quits
-// explicitly with Cmd + Q.
+// explicitly with Cmd + Q. However, in dev mode or non-macOS, quit when windows close.
 app.on('window-all-closed', () => {
-  // Keep app running (macOS behavior)
+  // In dev mode, allow quitting when windows close (for Ctrl+C and X button)
+  if (VITE_DEV_SERVER_URL) {
+    app.quit()
+    return
+  }
+  
+  // On non-macOS platforms, quit when all windows are closed
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+  // On macOS production, keep app running for tray functionality
 })
 
 app.on('activate', () => {

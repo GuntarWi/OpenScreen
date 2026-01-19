@@ -17,6 +17,39 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const isEditableTarget = (el: Element | null) => {
+      if (!el) return false;
+      const tag = el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+      return (el as HTMLElement).isContentEditable;
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'c' && key !== 'q') return;
+
+      const activeEl = document.activeElement;
+      if (isEditableTarget(activeEl)) return;
+
+      const selection = window.getSelection();
+      if (selection && selection.toString()) return;
+
+      e.preventDefault();
+      if (window.electronAPI?.quitApp) {
+        window.electronAPI.quitApp();
+      } else if (window.electronAPI?.hudOverlayClose) {
+        window.electronAPI.hudOverlayClose();
+      } else {
+        window.close();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [windowType]);
+
   switch (windowType) {
     case 'hud-overlay':
       return <LaunchWindow />;
