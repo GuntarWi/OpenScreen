@@ -63,6 +63,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openVideoFilePicker: () => {
     return ipcRenderer.invoke("open-video-file-picker");
   },
+  openVideoFilesPicker: () => {
+    return ipcRenderer.invoke("open-video-files-picker");
+  },
   openProjectFilePicker: () => {
     return ipcRenderer.invoke("open-project-file-picker");
   },

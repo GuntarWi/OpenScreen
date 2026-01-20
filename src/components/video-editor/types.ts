@@ -1,3 +1,9 @@
+export interface PaddingKeyframe {
+  id: string;
+  timeMs: number;
+  value: number;
+}
+
 export type ZoomDepth = 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface ZoomFocus {
@@ -92,6 +98,50 @@ export interface AnnotationRegion {
   exitEffect?: AnnotationEnterExitEffect;
 }
 
+export interface OverlayVideoAsset {
+  id: string;
+  name: string;
+  src: string;
+  durationMs: number;
+  width: number;
+  height: number;
+}
+
+export type OverlayVideoFit = 'contain' | 'cover';
+
+export interface OverlayVideoCrop {
+  x: number;      // crop start x as percentage (0-100)
+  y: number;      // crop start y as percentage (0-100)
+  width: number;  // crop width as percentage (0-100)
+  height: number; // crop height as percentage (0-100)
+}
+
+export const DEFAULT_OVERLAY_CROP: OverlayVideoCrop = {
+  x: 0,
+  y: 0,
+  width: 100,
+  height: 100,
+};
+
+export type OverlayEffect = 'none' | 'fade' | 'pixel';
+
+export interface OverlayVideoRegion {
+  id: string;
+  assetId: string;
+  startMs: number;
+  endMs: number;
+  position: AnnotationPosition;
+  size: AnnotationSize;
+  zIndex: number;
+  borderRadius?: number;
+  fit?: OverlayVideoFit;
+  crop?: OverlayVideoCrop;
+  enterEffect?: OverlayEffect;
+  exitEffect?: OverlayEffect;
+  fadeInMs?: number;
+  fadeOutMs?: number;
+}
+
 export const DEFAULT_ANNOTATION_POSITION: AnnotationPosition = {
   x: 50,
   y: 50,
@@ -129,6 +179,16 @@ export const DEFAULT_ANNOTATION_EFFECTS: {
   fadeOutMs: 240,
   enterEffect: 'fade',
   exitEffect: 'fade',
+};
+
+export const DEFAULT_OVERLAY_POSITION: AnnotationPosition = {
+  x: 65,
+  y: 65,
+};
+
+export const DEFAULT_OVERLAY_SIZE: AnnotationSize = {
+  width: 30,
+  height: 30,
 };
 
 export type EffectType = 'perspective' | 'shake';
@@ -219,6 +279,16 @@ export const DEFAULT_CROP_REGION: CropRegion = {
   y: 0,
   width: 1,
   height: 1,
+};
+
+export interface ScreenOffset {
+  x: number; // percent of output width (-50 to 50 recommended)
+  y: number; // percent of output height (-50 to 50 recommended)
+}
+
+export const DEFAULT_SCREEN_OFFSET: ScreenOffset = {
+  x: 0,
+  y: 0,
 };
 
 export const ZOOM_DEPTH_SCALES: Record<ZoomDepth, number> = {

@@ -61,6 +61,28 @@ const ANIMATED_DECODER_PROMISES = new Map<string, Promise<{
   frameDurations: number[];
 } | null>>();
 
+function getImageTypeFallback(src: string): string {
+  const lower = src.toLowerCase();
+  if (lower.startsWith('data:')) {
+    const dataType = lower.slice(5).split(';')[0];
+    if (dataType.startsWith('image/')) {
+      return dataType;
+    }
+  }
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return 'image/webp';
+}
+
+function resolveDecoderType(src: string, headerType: string | null): string {
+  if (headerType && headerType.startsWith('image/')) {
+    return headerType;
+  }
+  return getImageTypeFallback(src);
+}
+
 async function getAnimatedDecoder(src: string): Promise<{
   decoder: ImageDecoder;
   frameCount: number;
@@ -83,7 +105,7 @@ async function getAnimatedDecoder(src: string): Promise<{
       const response = await fetch(src, { mode: 'cors' });
       if (!response.ok) return null;
 
-      const contentType = response.headers.get('content-type') || 'image/webp';
+      const contentType = resolveDecoderType(src, response.headers.get('content-type'));
       const data = await response.arrayBuffer();
 
       const decoder = new ImageDecoder({

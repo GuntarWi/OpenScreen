@@ -9,7 +9,7 @@ import Row from "./Row";
 import Item from "./Item";
 import KeyframeMarkers from "./KeyframeMarkers";
 import type { Range, Span } from "dnd-timeline";
-import type { ZoomRegion, TrimRegion, AnnotationRegion, CursorTrack, EffectRegion, CursorSmoothing, ClipSegment } from "../types";
+import type { ZoomRegion, TrimRegion, AnnotationRegion, CursorTrack, EffectRegion, CursorSmoothing, ClipSegment, OverlayVideoAsset, OverlayVideoRegion } from "../types";
 import { Switch } from "@/components/ui/switch";
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -18,11 +18,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { type AspectRatio, getAspectRatioLabel } from "@/utils/aspectRatioUtils";
+import { type AspectRatio, getAspectRatioLabel, RESOLUTION_PRESETS, type ResolutionPreset } from "@/utils/aspectRatioUtils";
 import { formatShortcut } from "@/utils/platformUtils";
 
 const ZOOM_ROW_ID = "row-zoom";
 const VIDEO_ROW_ID = "row-video";
+const OVERLAY_ROW_ID = "row-overlay";
 const TRIM_ROW_ID = "row-trim";
 const EFFECT_ROW_ID = "row-effect";
 const CURSOR_ROW_ID = "row-cursor";
@@ -59,6 +60,14 @@ interface TimelineEditorProps {
   onAnnotationDelete?: (id: string) => void;
   selectedAnnotationId?: string | null;
   onSelectAnnotation?: (id: string | null) => void;
+  overlayAssets?: OverlayVideoAsset[];
+  overlayRegions?: OverlayVideoRegion[];
+  onOverlaySpanChange?: (id: string, span: Span) => void;
+  onOverlayDelete?: (id: string) => void;
+  onOverlaySplit?: () => void;
+  selectedOverlayId?: string | null;
+  onSelectOverlay?: (id: string | null) => void;
+  onOverlayAssetDrop?: (assetId: string, startMs: number) => void;
   effectRegions?: EffectRegion[];
   onEffectAdded?: (span: Span) => void;
   onEffectSpanChange?: (id: string, span: Span) => void;
@@ -70,10 +79,13 @@ interface TimelineEditorProps {
   onSelectCursor?: (id: string | null) => void;
   aspectRatio: AspectRatio;
   onAspectRatioChange: (aspectRatio: AspectRatio) => void;
+  resolutionPresetId: string;
+  onResolutionPresetChange: (presetId: string) => void;
   cursorEnabled?: boolean;
   onCursorEnabledChange?: (enabled: boolean) => void;
   cursorSmoothing?: CursorSmoothing;
   onCursorSmoothingChange?: (smoothing: CursorSmoothing) => void;
+  paddingKeyframes?: { id: string; timeMs: number; value: number }[];
 }
 
 interface TimelineScaleConfig {
@@ -90,7 +102,7 @@ interface TimelineRenderItem {
   span: Span;
   label: string;
   zoomDepth?: number;
-  variant: 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip';
+  variant: 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'overlay';
   annotationType?: AnnotationRegion['type'];
 }
 
@@ -181,12 +193,12 @@ function formatTimeLabel(milliseconds: number, intervalMs: number) {
 
 function PlaybackCursor({ 
   currentTimeMs, 
-  videoDurationMs,
+  seekDurationMs,
   onSeek,
   timelineRef,
 }: { 
   currentTimeMs: number; 
-  videoDurationMs: number;
+  seekDurationMs: number;
   onSeek?: (time: number) => void;
   timelineRef: React.RefObject<HTMLDivElement>;
 }) {
@@ -205,7 +217,7 @@ function PlaybackCursor({
       
       // Allow dragging outside to 0 or max, but clamp the value
       const relativeMs = pixelsToValue(clickX);
-      const absoluteMs = Math.max(0, Math.min(range.start + relativeMs, videoDurationMs));
+      const absoluteMs = Math.max(0, Math.min(range.start + relativeMs, seekDurationMs));
       
       onSeek(absoluteMs / 1000);
     };
@@ -224,13 +236,13 @@ function PlaybackCursor({
       window.removeEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = '';
     };
-  }, [isDragging, onSeek, timelineRef, sidebarWidth, range.start, videoDurationMs, pixelsToValue]);
+  }, [isDragging, onSeek, timelineRef, sidebarWidth, range.start, seekDurationMs, pixelsToValue]);
 
-  if (videoDurationMs <= 0 || currentTimeMs < 0) {
+  if (seekDurationMs <= 0 || currentTimeMs < 0) {
     return null;
   }
 
-  const clampedTime = Math.min(currentTimeMs, videoDurationMs);
+  const clampedTime = Math.min(currentTimeMs, seekDurationMs);
   
   if (clampedTime < range.start || clampedTime > range.end) {
     return null;
@@ -269,11 +281,11 @@ function PlaybackCursor({
 
 function TimelineAxis({
   intervalMs,
-  videoDurationMs,
+  timelineDurationMs,
   currentTimeMs,
 }: {
   intervalMs: number;
-  videoDurationMs: number;
+  timelineDurationMs: number;
   currentTimeMs: number;
 }) {
   const { sidebarWidth, direction, range, valueToPixels } = useTimelineContext();
@@ -284,7 +296,7 @@ function TimelineAxis({
       return { markers: [], minorTicks: [] };
     }
 
-    const maxTime = videoDurationMs > 0 ? videoDurationMs : range.end;
+    const maxTime = timelineDurationMs > 0 ? timelineDurationMs : range.end;
     const visibleStart = Math.max(0, Math.min(range.start, maxTime));
     const visibleEnd = Math.min(range.end, maxTime);
     const markerTimes = new Set<number>();
@@ -301,8 +313,8 @@ function TimelineAxis({
       markerTimes.add(Math.round(visibleStart));
     }
     
-    if (videoDurationMs > 0) {
-      markerTimes.add(Math.round(videoDurationMs));
+    if (timelineDurationMs > 0) {
+      markerTimes.add(Math.round(timelineDurationMs));
     }
 
     const sorted = Array.from(markerTimes)
@@ -330,7 +342,7 @@ function TimelineAxis({
       })), 
       minorTicks 
     };
-  }, [intervalMs, range.end, range.start, videoDurationMs]);
+  }, [intervalMs, range.end, range.start, timelineDurationMs]);
 
   return (
     <div
@@ -386,7 +398,8 @@ function TimelineAxis({
 
 function Timeline({
   items,
-  videoDurationMs,
+  timelineDurationMs,
+  seekDurationMs,
   intervalMs,
   currentTimeMs,
   onSeek,
@@ -394,17 +407,21 @@ function Timeline({
   onSelectTrim,
   onSelectClip,
   onSelectAnnotation,
+  onSelectOverlay,
   onSelectEffect,
   onSelectCursor,
+  onOverlayAssetDrop,
   selectedClipId,
   selectedZoomId,
   selectedTrimId,
   selectedAnnotationId,
+  selectedOverlayId,
   selectedEffectId,
   selectedCursorId,
 }: {
   items: TimelineRenderItem[];
-  videoDurationMs: number;
+  timelineDurationMs: number;
+  seekDurationMs: number;
   intervalMs: number;
   currentTimeMs: number;
   onSeek?: (time: number) => void;
@@ -412,12 +429,15 @@ function Timeline({
   onSelectTrim?: (id: string | null) => void;
   onSelectClip?: (id: string | null) => void;
   onSelectAnnotation?: (id: string | null) => void;
+  onSelectOverlay?: (id: string | null) => void;
   onSelectEffect?: (id: string | null) => void;
   onSelectCursor?: (id: string | null) => void;
+  onOverlayAssetDrop?: (assetId: string, startMs: number) => void;
   selectedClipId?: string | null;
   selectedZoomId: string | null;
   selectedTrimId?: string | null;
   selectedAnnotationId?: string | null;
+  selectedOverlayId?: string | null;
   selectedEffectId?: string | null;
   selectedCursorId?: string | null;
 }) {
@@ -430,7 +450,7 @@ function Timeline({
   }, [setTimelineRef]);
 
   const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!onSeek || videoDurationMs <= 0) return;
+    if (!onSeek || seekDurationMs <= 0) return;
     
     // Only clear selection if clicking on empty space (not on items)
     // This is handled by event propagation - items stop propagation
@@ -438,6 +458,7 @@ function Timeline({
     onSelectZoom?.(null);
     onSelectTrim?.(null);
     onSelectAnnotation?.(null);
+    onSelectOverlay?.(null);
     onSelectEffect?.(null);
     onSelectCursor?.(null);
 
@@ -447,13 +468,33 @@ function Timeline({
     if (clickX < 0) return;
     
     const relativeMs = pixelsToValue(clickX);
-    const absoluteMs = Math.max(0, Math.min(range.start + relativeMs, videoDurationMs));
+    const absoluteMs = Math.max(0, Math.min(range.start + relativeMs, seekDurationMs));
     const timeInSeconds = absoluteMs / 1000;
     
     onSeek(timeInSeconds);
-  }, [onSeek, onSelectClip, onSelectZoom, onSelectTrim, onSelectAnnotation, onSelectEffect, videoDurationMs, sidebarWidth, range.start, pixelsToValue]);
+  }, [onSeek, onSelectClip, onSelectZoom, onSelectTrim, onSelectAnnotation, onSelectOverlay, onSelectEffect, onSelectCursor, seekDurationMs, sidebarWidth, range.start, pixelsToValue]);
+
+  const handleOverlayDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!onOverlayAssetDrop) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }, [onOverlayAssetDrop]);
+
+  const handleOverlayDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!onOverlayAssetDrop || !localTimelineRef.current) return;
+    const assetId = event.dataTransfer.getData('application/x-overlay-asset');
+    if (!assetId) return;
+    event.preventDefault();
+    const rect = localTimelineRef.current.getBoundingClientRect();
+    const dropX = event.clientX - rect.left - sidebarWidth;
+    if (dropX < 0) return;
+    const relativeMs = pixelsToValue(dropX);
+    const absoluteMs = Math.max(0, Math.min(range.start + relativeMs, timelineDurationMs));
+    onOverlayAssetDrop(assetId, absoluteMs);
+  }, [onOverlayAssetDrop, sidebarWidth, range.start, pixelsToValue, timelineDurationMs]);
 
   const clipItems = items.filter(item => item.rowId === VIDEO_ROW_ID);
+  const overlayItems = items.filter(item => item.rowId === OVERLAY_ROW_ID);
   const zoomItems = items.filter(item => item.rowId === ZOOM_ROW_ID);
   const trimItems = items.filter(item => item.rowId === TRIM_ROW_ID);
   const effectItems = items.filter(item => item.rowId === EFFECT_ROW_ID);
@@ -468,10 +509,10 @@ function Timeline({
       onClick={handleTimelineClick}
     >
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px)] bg-[length:20px_100%] pointer-events-none" />
-      <TimelineAxis intervalMs={intervalMs} videoDurationMs={videoDurationMs} currentTimeMs={currentTimeMs} />
+      <TimelineAxis intervalMs={intervalMs} timelineDurationMs={timelineDurationMs} currentTimeMs={currentTimeMs} />
       <PlaybackCursor 
         currentTimeMs={currentTimeMs} 
-        videoDurationMs={videoDurationMs} 
+        seekDurationMs={seekDurationMs} 
         onSeek={onSeek}
         timelineRef={localTimelineRef}
       />
@@ -486,6 +527,22 @@ function Timeline({
             isSelected={item.id === selectedClipId}
             onSelect={() => onSelectClip?.(item.id)}
             variant="clip"
+          >
+            {item.label}
+          </Item>
+        ))}
+      </Row>
+
+      <Row id={OVERLAY_ROW_ID} onDrop={handleOverlayDrop} onDragOver={handleOverlayDragOver}>
+        {overlayItems.map((item) => (
+          <Item
+            id={item.id}
+            key={item.id}
+            rowId={item.rowId}
+            span={item.span}
+            isSelected={item.id === selectedOverlayId}
+            onSelect={() => onSelectOverlay?.(item.id)}
+            variant="overlay"
           >
             {item.label}
           </Item>
@@ -611,6 +668,14 @@ export default function TimelineEditor({
   onAnnotationDelete,
   selectedAnnotationId,
   onSelectAnnotation,
+  overlayAssets = [],
+  overlayRegions = [],
+  onOverlaySpanChange,
+  onOverlayDelete,
+  onOverlaySplit,
+  selectedOverlayId,
+  onSelectOverlay,
+  onOverlayAssetDrop,
   effectRegions = [],
   onEffectAdded,
   onEffectSpanChange,
@@ -626,16 +691,30 @@ export default function TimelineEditor({
   onCursorSmoothingChange,
   aspectRatio,
   onAspectRatioChange,
+  resolutionPresetId,
+  paddingKeyframes = [],
+  onResolutionPresetChange,
 }: TimelineEditorProps) {
-  const totalMs = useMemo(() => Math.max(0, Math.round(videoDuration * 1000)), [videoDuration]);
+  const videoDurationMs = useMemo(() => Math.max(0, Math.round(videoDuration * 1000)), [videoDuration]);
+  const overlayMaxEndMs = useMemo(
+    () => overlayRegions.reduce((max, region) => Math.max(max, region.endMs), 0),
+    [overlayRegions],
+  );
+  const timelineDurationMs = useMemo(
+    () => Math.max(videoDurationMs, overlayMaxEndMs),
+    [videoDurationMs, overlayMaxEndMs],
+  );
   const currentTimeMs = useMemo(() => Math.round(currentTime * 1000), [currentTime]);
-  const timelineScale = useMemo(() => calculateTimelineScale(videoDuration), [videoDuration]);
+  const timelineScale = useMemo(
+    () => calculateTimelineScale(timelineDurationMs / 1000),
+    [timelineDurationMs],
+  );
   const safeMinDurationMs = useMemo(
-    () => (totalMs > 0 ? Math.min(timelineScale.minItemDurationMs, totalMs) : timelineScale.minItemDurationMs),
-    [timelineScale.minItemDurationMs, totalMs],
+    () => (timelineDurationMs > 0 ? Math.min(timelineScale.minItemDurationMs, timelineDurationMs) : timelineScale.minItemDurationMs),
+    [timelineScale.minItemDurationMs, timelineDurationMs],
   );
 
-  const [range, setRange] = useState<Range>(() => createInitialRange(totalMs));
+  const [range, setRange] = useState<Range>(() => createInitialRange(timelineDurationMs));
   const [keyframes, setKeyframes] = useState<{ id: string; time: number }[]>([]);
   const [selectedKeyframeId, setSelectedKeyframeId] = useState<string | null>(null);
   const [shortcuts, setShortcuts] = useState({
@@ -653,11 +732,11 @@ export default function TimelineEditor({
 
   // Add keyframe at current playhead position
   const addKeyframe = useCallback(() => {
-    if (totalMs === 0) return;
-    const time = Math.max(0, Math.min(currentTimeMs, totalMs));
+    if (videoDurationMs === 0) return;
+    const time = Math.max(0, Math.min(currentTimeMs, videoDurationMs));
     if (keyframes.some(kf => Math.abs(kf.time - time) < 1)) return;
     setKeyframes(prev => [...prev, { id: uuidv4(), time }]);
-  }, [currentTimeMs, totalMs, keyframes]);
+  }, [currentTimeMs, videoDurationMs, keyframes]);
 
   // Delete selected keyframe
   const deleteSelectedKeyframe = useCallback(() => {
@@ -698,21 +777,27 @@ export default function TimelineEditor({
     onSelectAnnotation(null);
   }, [selectedAnnotationId, onAnnotationDelete, onSelectAnnotation]);
 
-  useEffect(() => {
-    setRange(createInitialRange(totalMs));
-  }, [totalMs]);
+  const deleteSelectedOverlay = useCallback(() => {
+    if (!selectedOverlayId || !onOverlayDelete || !onSelectOverlay) return;
+    onOverlayDelete(selectedOverlayId);
+    onSelectOverlay(null);
+  }, [selectedOverlayId, onOverlayDelete, onSelectOverlay]);
 
   useEffect(() => {
-    if (totalMs === 0 || safeMinDurationMs <= 0) {
+    setRange(createInitialRange(timelineDurationMs));
+  }, [timelineDurationMs]);
+
+  useEffect(() => {
+    if (videoDurationMs === 0 || safeMinDurationMs <= 0) {
       return;
     }
 
     zoomRegions.forEach((region) => {
-      const clampedStart = Math.max(0, Math.min(region.startMs, totalMs));
+      const clampedStart = Math.max(0, Math.min(region.startMs, videoDurationMs));
       const minEnd = clampedStart + safeMinDurationMs;
-      const clampedEnd = Math.min(totalMs, Math.max(minEnd, region.endMs));
-      const normalizedStart = Math.max(0, Math.min(clampedStart, totalMs - safeMinDurationMs));
-      const normalizedEnd = Math.max(minEnd, Math.min(clampedEnd, totalMs));
+      const clampedEnd = Math.min(videoDurationMs, Math.max(minEnd, region.endMs));
+      const normalizedStart = Math.max(0, Math.min(clampedStart, videoDurationMs - safeMinDurationMs));
+      const normalizedEnd = Math.max(minEnd, Math.min(clampedEnd, videoDurationMs));
 
       if (normalizedStart !== region.startMs || normalizedEnd !== region.endMs) {
         onZoomSpanChange(region.id, { start: normalizedStart, end: normalizedEnd });
@@ -720,11 +805,11 @@ export default function TimelineEditor({
     });
 
     trimRegions.forEach((region) => {
-      const clampedStart = Math.max(0, Math.min(region.startMs, totalMs));
+      const clampedStart = Math.max(0, Math.min(region.startMs, videoDurationMs));
       const minEnd = clampedStart + safeMinDurationMs;
-      const clampedEnd = Math.min(totalMs, Math.max(minEnd, region.endMs));
-      const normalizedStart = Math.max(0, Math.min(clampedStart, totalMs - safeMinDurationMs));
-      const normalizedEnd = Math.max(minEnd, Math.min(clampedEnd, totalMs));
+      const clampedEnd = Math.min(videoDurationMs, Math.max(minEnd, region.endMs));
+      const normalizedStart = Math.max(0, Math.min(clampedStart, videoDurationMs - safeMinDurationMs));
+      const normalizedEnd = Math.max(minEnd, Math.min(clampedEnd, videoDurationMs));
 
       if (normalizedStart !== region.startMs || normalizedEnd !== region.endMs) {
         onTrimSpanChange?.(region.id, { start: normalizedStart, end: normalizedEnd });
@@ -732,17 +817,31 @@ export default function TimelineEditor({
     });
 
     clipSegments.forEach((segment) => {
-      const clampedStart = Math.max(0, Math.min(segment.startMs, totalMs));
+      const clampedStart = Math.max(0, Math.min(segment.startMs, videoDurationMs));
       const minEnd = clampedStart + safeMinDurationMs;
-      const clampedEnd = Math.min(totalMs, Math.max(minEnd, segment.endMs));
-      const normalizedStart = Math.max(0, Math.min(clampedStart, totalMs - safeMinDurationMs));
-      const normalizedEnd = Math.max(minEnd, Math.min(clampedEnd, totalMs));
+      const clampedEnd = Math.min(videoDurationMs, Math.max(minEnd, segment.endMs));
+      const normalizedStart = Math.max(0, Math.min(clampedStart, videoDurationMs - safeMinDurationMs));
+      const normalizedEnd = Math.max(minEnd, Math.min(clampedEnd, videoDurationMs));
 
       if (normalizedStart !== segment.startMs || normalizedEnd !== segment.endMs) {
         onClipSpanChange?.(segment.id, { start: normalizedStart, end: normalizedEnd });
       }
     });
-  }, [zoomRegions, trimRegions, annotationRegions, clipSegments, totalMs, safeMinDurationMs, onZoomSpanChange, onTrimSpanChange, onAnnotationSpanChange, onClipSpanChange]);
+
+    overlayRegions.forEach((region) => {
+      if (!onOverlaySpanChange) return;
+      if (timelineDurationMs === 0) return;
+      const clampedStart = Math.max(0, Math.min(region.startMs, timelineDurationMs));
+      const minEnd = clampedStart + safeMinDurationMs;
+      const clampedEnd = Math.min(timelineDurationMs, Math.max(minEnd, region.endMs));
+      const normalizedStart = Math.max(0, Math.min(clampedStart, timelineDurationMs - safeMinDurationMs));
+      const normalizedEnd = Math.max(minEnd, Math.min(clampedEnd, timelineDurationMs));
+
+      if (normalizedStart !== region.startMs || normalizedEnd !== region.endMs) {
+        onOverlaySpanChange(region.id, { start: normalizedStart, end: normalizedEnd });
+      }
+    });
+  }, [zoomRegions, trimRegions, annotationRegions, clipSegments, overlayRegions, videoDurationMs, timelineDurationMs, safeMinDurationMs, onZoomSpanChange, onTrimSpanChange, onAnnotationSpanChange, onClipSpanChange, onOverlaySpanChange]);
 
   const hasOverlap = useCallback((newSpan: Span, excludeId?: string): boolean => {
     // Determine which row the item belongs to
@@ -751,8 +850,9 @@ export default function TimelineEditor({
     const isClipItem = clipSegments.some(r => r.id === excludeId);
     const isAnnotationItem = annotationRegions.some(r => r.id === excludeId);
     const isEffectItem = effectRegions.some(r => r.id === excludeId);
+    const isOverlayItem = overlayRegions.some(r => r.id === excludeId);
 
-    if (isAnnotationItem || isEffectItem) {
+    if (isAnnotationItem || isEffectItem || isOverlayItem) {
       return false;
     }
 
@@ -782,24 +882,24 @@ export default function TimelineEditor({
     }
 
     return false;
-  }, [zoomRegions, trimRegions, clipSegments, annotationRegions, effectRegions]);
+  }, [zoomRegions, trimRegions, clipSegments, annotationRegions, effectRegions, overlayRegions]);
 
   const handleAddZoom = useCallback(() => {
-    if (!videoDuration || videoDuration === 0 || totalMs === 0) {
+    if (!videoDuration || videoDuration === 0 || videoDurationMs === 0) {
       return;
     }
 
-    const defaultDuration = Math.min(1000, totalMs);
+    const defaultDuration = Math.min(1000, videoDurationMs);
     if (defaultDuration <= 0) {
       return;
     }
 
     // Always place zoom at playhead
-    const startPos = Math.max(0, Math.min(currentTimeMs, totalMs));
+    const startPos = Math.max(0, Math.min(currentTimeMs, videoDurationMs));
     // Find the next zoom region after the playhead
     const sorted = [...zoomRegions].sort((a, b) => a.startMs - b.startMs);
     const nextRegion = sorted.find(region => region.startMs > startPos);
-    const gapToNext = nextRegion ? nextRegion.startMs - startPos : totalMs - startPos;
+    const gapToNext = nextRegion ? nextRegion.startMs - startPos : videoDurationMs - startPos;
 
     // Check if playhead is inside any zoom region
     const isOverlapping = sorted.some(region => startPos >= region.startMs && startPos < region.endMs);
@@ -812,24 +912,24 @@ export default function TimelineEditor({
 
     const actualDuration = Math.min(1000, gapToNext);
     onZoomAdded({ start: startPos, end: startPos + actualDuration });
-  }, [videoDuration, totalMs, currentTimeMs, zoomRegions, onZoomAdded]);
+  }, [videoDuration, videoDurationMs, currentTimeMs, zoomRegions, onZoomAdded]);
 
   const handleAddTrim = useCallback(() => {
-    if (!videoDuration || videoDuration === 0 || totalMs === 0 || !onTrimAdded) {
+    if (!videoDuration || videoDuration === 0 || videoDurationMs === 0 || !onTrimAdded) {
       return;
     }
 
-    const defaultDuration = Math.min(1000, totalMs);
+    const defaultDuration = Math.min(1000, videoDurationMs);
     if (defaultDuration <= 0) {
       return;
     }
 
     // Always place trim at playhead
-    const startPos = Math.max(0, Math.min(currentTimeMs, totalMs));
+    const startPos = Math.max(0, Math.min(currentTimeMs, videoDurationMs));
     // Find the next trim region after the playhead
     const sorted = [...trimRegions].sort((a, b) => a.startMs - b.startMs);
     const nextRegion = sorted.find(region => region.startMs > startPos);
-    const gapToNext = nextRegion ? nextRegion.startMs - startPos : totalMs - startPos;
+    const gapToNext = nextRegion ? nextRegion.startMs - startPos : videoDurationMs - startPos;
 
     // Check if playhead is inside any trim region
     const isOverlapping = sorted.some(region => startPos >= region.startMs && startPos < region.endMs);
@@ -842,43 +942,62 @@ export default function TimelineEditor({
 
     const actualDuration = Math.min(1000, gapToNext);
     onTrimAdded({ start: startPos, end: startPos + actualDuration });
-  }, [videoDuration, totalMs, currentTimeMs, trimRegions, onTrimAdded]);
+  }, [videoDuration, videoDurationMs, currentTimeMs, trimRegions, onTrimAdded]);
 
   const handleSplitClip = useCallback(() => {
-    if (!videoDuration || videoDuration === 0 || totalMs === 0 || !onClipSplit) {
+    if (!videoDuration || videoDuration === 0 || videoDurationMs === 0 || !onClipSplit) {
       return;
     }
     onClipSplit();
-  }, [videoDuration, totalMs, onClipSplit]);
+  }, [videoDuration, videoDurationMs, onClipSplit]);
+
+  const handleSplitOverlay = useCallback(() => {
+    if (!videoDuration || videoDuration === 0 || videoDurationMs === 0 || !onOverlaySplit) {
+      return;
+    }
+    onOverlaySplit();
+  }, [videoDuration, videoDurationMs, onOverlaySplit]);
+
+  // Unified split handler - splits overlay if selected, otherwise splits main clip
+  const handleUnifiedSplit = useCallback(() => {
+    if (!videoDuration || videoDuration === 0 || videoDurationMs === 0) {
+      return;
+    }
+    if (selectedOverlayId && onOverlaySplit) {
+      onOverlaySplit();
+    } else if (onClipSplit) {
+      onClipSplit();
+    }
+  }, [videoDuration, videoDurationMs, selectedOverlayId, onOverlaySplit, onClipSplit]);
 
   const handleAddAnnotation = useCallback(() => {
-    if (!videoDuration || videoDuration === 0 || totalMs === 0 || !onAnnotationAdded) {
+    if (!videoDuration || videoDuration === 0 || videoDurationMs === 0 || !onAnnotationAdded) {
       return;
     }
 
-    const defaultDuration = Math.min(1000, totalMs);
+    const defaultDuration = Math.min(1000, videoDurationMs);
     if (defaultDuration <= 0) {
       return;
     }
 
     // Multiple annotations can exist at the same timestamp
-    const startPos = Math.max(0, Math.min(currentTimeMs, totalMs));
-    const endPos = Math.min(startPos + defaultDuration, totalMs);
+    const startPos = Math.max(0, Math.min(currentTimeMs, videoDurationMs));
+    const endPos = Math.min(startPos + defaultDuration, videoDurationMs);
     
     onAnnotationAdded({ start: startPos, end: endPos });
-  }, [videoDuration, totalMs, currentTimeMs, onAnnotationAdded]);
+  }, [videoDuration, videoDurationMs, currentTimeMs, onAnnotationAdded]);
 
   const handleAddEffect = useCallback(() => {
-    if (!videoDuration || videoDuration === 0 || totalMs === 0 || !onEffectAdded) {
+    if (!videoDuration || videoDuration === 0 || videoDurationMs === 0 || !onEffectAdded) {
       return;
     }
 
-    const startPos = Math.max(0, Math.min(currentTimeMs, totalMs));
-    const defaultDuration = Math.min(1200, totalMs);
-    const endPos = Math.min(startPos + defaultDuration, totalMs);
+    const startPos = Math.max(0, Math.min(currentTimeMs, videoDurationMs));
+    const defaultDuration = Math.min(1200, videoDurationMs);
+    const endPos = Math.min(startPos + defaultDuration, videoDurationMs);
 
     onEffectAdded({ start: startPos, end: endPos });
-  }, [videoDuration, totalMs, currentTimeMs, onEffectAdded]);
+  }, [videoDuration, videoDurationMs, currentTimeMs, onEffectAdded]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -896,7 +1015,7 @@ export default function TimelineEditor({
         handleAddTrim();
       }
       if (e.key === 's' || e.key === 'S') {
-        handleSplitClip();
+        handleUnifiedSplit();
       }
       if (e.key === 'a' || e.key === 'A') {
         handleAddAnnotation();
@@ -938,6 +1057,8 @@ export default function TimelineEditor({
           deleteSelectedClip();
         } else if (selectedEffectId) {
           deleteSelectedEffect();
+        } else if (selectedOverlayId) {
+          deleteSelectedOverlay();
         } else if (selectedAnnotationId) {
           deleteSelectedAnnotation();
         }
@@ -945,18 +1066,18 @@ export default function TimelineEditor({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addKeyframe, handleAddZoom, handleAddTrim, handleSplitClip, handleAddAnnotation, handleAddEffect, deleteSelectedKeyframe, deleteSelectedZoom, deleteSelectedTrim, deleteSelectedClip, deleteSelectedEffect, deleteSelectedAnnotation, selectedKeyframeId, selectedZoomId, selectedTrimId, selectedClipId, selectedEffectId, selectedAnnotationId, annotationRegions, currentTime, onSelectAnnotation, onSelectEffect]);
+  }, [addKeyframe, handleAddZoom, handleAddTrim, handleUnifiedSplit, handleAddAnnotation, handleAddEffect, deleteSelectedKeyframe, deleteSelectedZoom, deleteSelectedTrim, deleteSelectedClip, deleteSelectedEffect, deleteSelectedOverlay, deleteSelectedAnnotation, selectedKeyframeId, selectedZoomId, selectedTrimId, selectedClipId, selectedEffectId, selectedOverlayId, selectedAnnotationId, annotationRegions, currentTime, onSelectAnnotation, onSelectEffect, onSelectOverlay]);
 
   const clampedRange = useMemo<Range>(() => {
-    if (totalMs === 0) {
+    if (timelineDurationMs === 0) {
       return range;
     }
 
     return {
-      start: Math.max(0, Math.min(range.start, totalMs)),
-      end: Math.min(range.end, totalMs),
+      start: Math.max(0, Math.min(range.start, timelineDurationMs)),
+      end: Math.min(range.end, timelineDurationMs),
     };
-  }, [range, totalMs]);
+  }, [range, timelineDurationMs]);
 
   const timelineItems = useMemo<TimelineRenderItem[]>(() => {
     const clips: TimelineRenderItem[] = clipSegments.map((segment, index) => ({
@@ -966,6 +1087,19 @@ export default function TimelineEditor({
       label: `Clip ${index + 1} · ${((segment.endMs - segment.startMs) / 1000).toFixed(1)}s`,
       variant: 'clip',
     }));
+
+    const overlays: TimelineRenderItem[] = overlayRegions.map((region) => {
+      const asset = overlayAssets.find((item) => item.id === region.assetId);
+      const labelBase = asset?.name || 'Overlay';
+      const durationSec = Math.max(0, (region.endMs - region.startMs) / 1000).toFixed(1);
+      return {
+        id: region.id,
+        rowId: OVERLAY_ROW_ID,
+        span: { start: region.startMs, end: region.endMs },
+        label: `${labelBase} - ${durationSec}s`,
+        variant: 'overlay',
+      };
+    });
 
     const zooms: TimelineRenderItem[] = zoomRegions.map((region, index) => ({
       id: region.id,
@@ -1025,18 +1159,27 @@ export default function TimelineEditor({
       };
     });
 
-    const cursors: TimelineRenderItem[] = cursorEnabled && cursorTrack && cursorTrack.events.length > 0 && totalMs > 0
+    const cursors: TimelineRenderItem[] = cursorEnabled && cursorTrack && cursorTrack.events.length > 0 && videoDurationMs > 0
       ? [{
           id: CURSOR_ITEM_ID,
           rowId: CURSOR_ROW_ID,
-          span: { start: 0, end: totalMs },
+          span: { start: 0, end: videoDurationMs },
           label: 'Cursor',
           variant: 'cursor',
         }]
       : [];
 
-    return [...clips, ...zooms, ...effects, ...trims, ...cursors, ...annotations];
-  }, [clipSegments, zoomRegions, trimRegions, effectRegions, annotationRegions, cursorTrack, totalMs]);
+    return [...clips, ...overlays, ...zooms, ...effects, ...trims, ...cursors, ...annotations];
+  }, [clipSegments, overlayRegions, overlayAssets, zoomRegions, trimRegions, effectRegions, annotationRegions, cursorTrack, videoDurationMs]);
+
+  const clampSpanToVideo = useCallback((span: Span): Span => {
+    if (videoDurationMs <= 0) return span;
+    const rawDuration = Math.max(span.end - span.start, 0);
+    const minDuration = Math.min(Math.max(safeMinDurationMs, 1), videoDurationMs);
+    const duration = Math.min(Math.max(rawDuration, minDuration), videoDurationMs);
+    const start = Math.max(0, Math.min(span.start, videoDurationMs - duration));
+    return { start, end: start + duration };
+  }, [videoDurationMs, safeMinDurationMs]);
 
   const handleItemSpanChange = useCallback((id: string, span: Span) => {
     // Check if it's a zoom or trim item
@@ -1044,17 +1187,19 @@ export default function TimelineEditor({
       return;
     }
     if (clipSegments.some(r => r.id === id)) {
-      onClipSpanChange?.(id, span);
+      onClipSpanChange?.(id, clampSpanToVideo(span));
     } else if (zoomRegions.some(r => r.id === id)) {
-      onZoomSpanChange(id, span);
+      onZoomSpanChange(id, clampSpanToVideo(span));
     } else if (trimRegions.some(r => r.id === id)) {
-      onTrimSpanChange?.(id, span);
+      onTrimSpanChange?.(id, clampSpanToVideo(span));
     } else if (effectRegions.some(r => r.id === id)) {
-      onEffectSpanChange?.(id, span);
+      onEffectSpanChange?.(id, clampSpanToVideo(span));
+    } else if (overlayRegions.some(r => r.id === id)) {
+      onOverlaySpanChange?.(id, span);
     } else if (annotationRegions.some(r => r.id === id)) {
-      onAnnotationSpanChange?.(id, span);
+      onAnnotationSpanChange?.(id, clampSpanToVideo(span));
     }
-  }, [clipSegments, zoomRegions, trimRegions, effectRegions, annotationRegions, onClipSpanChange, onZoomSpanChange, onTrimSpanChange, onEffectSpanChange, onAnnotationSpanChange]);
+  }, [clipSegments, zoomRegions, trimRegions, effectRegions, overlayRegions, annotationRegions, onClipSpanChange, onZoomSpanChange, onTrimSpanChange, onEffectSpanChange, onOverlaySpanChange, onAnnotationSpanChange, clampSpanToVideo]);
 
   if (!videoDuration || videoDuration === 0) {
     return (
@@ -1075,13 +1220,13 @@ export default function TimelineEditor({
       <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5 bg-[#09090b]">
         <div className="flex items-center gap-1">
           <Button
-            onClick={handleSplitClip}
+            onClick={handleUnifiedSplit}
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-slate-400 hover:text-white hover:bg-white/10 transition-all"
-            title="Split Clip (S)"
+            title={selectedOverlayId ? "Split Overlay (S)" : "Split Clip (S)"}
           >
-            <Clapperboard className="w-4 h-4" />
+            <Scissors className="w-4 h-4" />
           </Button>
           <Button
             onClick={deleteSelectedClip}
@@ -1137,11 +1282,43 @@ export default function TimelineEditor({
               {(['16:9', '9:16', '1:1', '4:3', '4:5'] as AspectRatio[]).map((ratio) => (
                 <DropdownMenuItem
                   key={ratio}
-                  onClick={() => onAspectRatioChange(ratio)}
+                  onClick={() => {
+                    onAspectRatioChange(ratio);
+                    onResolutionPresetChange('auto');
+                  }}
                   className="text-slate-300 hover:text-white hover:bg-white/10 cursor-pointer flex items-center justify-between gap-3"
                 >
                   <span>{getAspectRatioLabel(ratio)}</span>
                   {aspectRatio === ratio && <Check className="w-3 h-3 text-[#34B27B]" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/10 transition-all gap-1"
+              >
+                <span className="font-medium">
+                  {RESOLUTION_PRESETS[aspectRatio].find(p => p.id === resolutionPresetId)?.label || 'Auto'}
+                </span>
+                <ChevronDown className="w-3 h-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-[#1a1a1a] border-white/10">
+              {RESOLUTION_PRESETS[aspectRatio].map((preset) => (
+                <DropdownMenuItem
+                  key={preset.id}
+                  onClick={() => onResolutionPresetChange(preset.id)}
+                  className="text-slate-300 hover:text-white hover:bg-white/10 cursor-pointer flex items-center justify-between gap-3"
+                >
+                  <div className="flex flex-col">
+                    <span>{preset.label}</span>
+                    {preset.platform && <span className="text-[10px] text-slate-500">{preset.platform}</span>}
+                  </div>
+                  {resolutionPresetId === preset.id && <Check className="w-3 h-3 text-[#34B27B]" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -1175,7 +1352,7 @@ export default function TimelineEditor({
       >
         <TimelineWrapper
           range={clampedRange}
-          videoDuration={videoDuration}
+          videoDuration={timelineDurationMs / 1000}
           hasOverlap={hasOverlap}
           onRangeChange={setRange}
           minItemDurationMs={timelineScale.minItemDurationMs}
@@ -1184,28 +1361,35 @@ export default function TimelineEditor({
           onItemSpanChange={handleItemSpanChange}
         >
           <KeyframeMarkers
-            keyframes={keyframes}
+            keyframes={[
+              ...keyframes,
+              ...paddingKeyframes.map(kf => ({ id: kf.id, time: kf.timeMs }))
+            ]}
             selectedKeyframeId={selectedKeyframeId}
             setSelectedKeyframeId={setSelectedKeyframeId}
           />
           <Timeline
             items={timelineItems}
-            videoDurationMs={totalMs}
+            timelineDurationMs={timelineDurationMs}
+            seekDurationMs={videoDurationMs}
             intervalMs={timelineScale.intervalMs}
             currentTimeMs={currentTimeMs}
             onSeek={onSeek}
             onSelectClip={onSelectClip}
             onSelectZoom={onSelectZoom}
             onSelectTrim={onSelectTrim}
-          onSelectAnnotation={onSelectAnnotation}
-          onSelectEffect={onSelectEffect}
-          onSelectCursor={onSelectCursor}
-          selectedClipId={selectedClipId}
-          selectedZoomId={selectedZoomId}
-          selectedTrimId={selectedTrimId}
-          selectedAnnotationId={selectedAnnotationId}
-          selectedEffectId={selectedEffectId}
-          selectedCursorId={selectedCursorId}
+            onSelectAnnotation={onSelectAnnotation}
+            onSelectOverlay={onSelectOverlay}
+            onSelectEffect={onSelectEffect}
+            onSelectCursor={onSelectCursor}
+            onOverlayAssetDrop={onOverlayAssetDrop}
+            selectedClipId={selectedClipId}
+            selectedZoomId={selectedZoomId}
+            selectedTrimId={selectedTrimId}
+            selectedAnnotationId={selectedAnnotationId}
+            selectedOverlayId={selectedOverlayId}
+            selectedEffectId={selectedEffectId}
+            selectedCursorId={selectedCursorId}
         />
         </TimelineWrapper>
       </div>

@@ -10,7 +10,7 @@ import { useState } from "react";
 import Block from '@uiw/react-color-block';
 import { Trash2, Download, Crop, X, Bug, Upload, Star } from "lucide-react";
 import { toast } from "sonner";
-import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion } from "./types";
+import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion, ScreenOffset, OverlayVideoAsset, OverlayVideoRegion, OverlayVideoFit, OverlayEffect, PaddingKeyframe } from "./types";
 import { CropControl } from "./CropControl";
 import { KeyboardShortcutsHelp } from "./KeyboardShortcutsHelp";
 import { AnnotationSettingsPanel } from "./AnnotationSettingsPanel";
@@ -66,6 +66,18 @@ interface SettingsPanelProps {
   onBorderRadiusChange?: (radius: number) => void;
   padding?: number;
   onPaddingChange?: (padding: number) => void;
+  paddingKeyframes?: PaddingKeyframe[];
+  onPaddingKeyframesChange?: (keyframes: PaddingKeyframe[]) => void;
+  currentTime?: number;
+  screenOffset?: ScreenOffset;
+  onScreenOffsetChange?: (patch: Partial<ScreenOffset>) => void;
+  overlayAssets?: OverlayVideoAsset[];
+  overlayRegions?: OverlayVideoRegion[];
+  selectedOverlayId?: string | null;
+  onOverlayAssetAdd?: () => void;
+  onOverlayAssetRemove?: (id: string) => void;
+  onOverlayAddToTimeline?: (assetId: string) => void;
+  onOverlayRegionChange?: (id: string, patch: Partial<OverlayVideoRegion>) => void;
   cropRegion?: CropRegion;
   onCropChange?: (region: CropRegion) => void;
   aspectRatio: AspectRatio;
@@ -137,7 +149,19 @@ export function SettingsPanel({
   borderRadius = 0, 
   onBorderRadiusChange, 
   padding = 50, 
-  onPaddingChange, 
+  onPaddingChange,
+  paddingKeyframes = [],
+  onPaddingKeyframesChange,
+  currentTime = 0,
+  screenOffset = { x: 0, y: 0 },
+  onScreenOffsetChange,
+  overlayAssets = [],
+  overlayRegions = [],
+  selectedOverlayId,
+  onOverlayAssetAdd,
+  onOverlayAssetRemove,
+  onOverlayAddToTimeline,
+  onOverlayRegionChange,
   cropRegion, 
   onCropChange, 
   aspectRatio, 
@@ -204,6 +228,12 @@ export function SettingsPanel({
   const [selectedColor, setSelectedColor] = useState('#ADADAD');
   const [gradient, setGradient] = useState<string>(GRADIENTS[0]);
   const [showCropDropdown, setShowCropDropdown] = useState(false);
+  const screenOffsetX = screenOffset?.x ?? 0;
+  const screenOffsetY = screenOffset?.y ?? 0;
+  const overlayCount = overlayRegions.length;
+  const selectedOverlay = selectedOverlayId
+    ? overlayRegions.find((region) => region.id === selectedOverlayId) ?? null
+    : null;
   // Local follow state to allow toggling even if parent doesn't pass handler
   const [zoomFollowEnabledLocal, setZoomFollowEnabledLocal] = useState<boolean>(Boolean((zoomFollowEnabled as boolean) || false));
   useEffect(() => {
@@ -325,6 +355,16 @@ export function SettingsPanel({
 
   return (
     <div className="flex-[2] min-w-0 bg-[#09090b] border border-white/5 rounded-2xl p-4 flex flex-col shadow-xl h-full overflow-y-auto custom-scrollbar">
+      <Tabs defaultValue="screen" className="flex-1 flex flex-col min-h-0">
+        <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-2 h-auto rounded-xl">
+          <TabsTrigger value="screen" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
+            Screen
+          </TabsTrigger>
+          <TabsTrigger value="overlays" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
+            Overlays
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="screen" className="mt-0 space-y-4">
       {cursorEnabled && cursorTrack && onCursorStyleChange && (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
@@ -764,17 +804,111 @@ export function SettingsPanel({
               className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
             />
           </div>
-          {/* Padding Slider */}
+          {/* Padding Slider with Keyframes */}
           <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
             <div className="flex items-center justify-between">
-              <div className="text-xs font-medium text-slate-200">Padding</div>
-              <span className="text-[10px] text-slate-400 font-mono">{padding}%</span>
+              <div className="text-xs font-medium text-slate-200 flex items-center gap-1.5">
+                Padding
+                {paddingKeyframes.length > 0 && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
+                    {paddingKeyframes.length} keyframes
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    const timeMs = Math.round(currentTime * 1000);
+                    const existingIdx = paddingKeyframes.findIndex(kf => Math.abs(kf.timeMs - timeMs) < 50);
+                    if (existingIdx >= 0) {
+                      // Update existing keyframe
+                      const updated = [...paddingKeyframes];
+                      updated[existingIdx] = { ...updated[existingIdx], value: padding };
+                      onPaddingKeyframesChange?.(updated);
+                      toast.success('Keyframe updated');
+                    } else {
+                      // Add new keyframe
+                      const newKf: PaddingKeyframe = {
+                        id: `kf-${Date.now()}`,
+                        timeMs,
+                        value: padding,
+                      };
+                      onPaddingKeyframesChange?.([...paddingKeyframes, newKf]);
+                      toast.success('Keyframe added');
+                    }
+                  }}
+                  className="p-1 rounded hover:bg-white/10 text-yellow-400 transition-colors"
+                  title="Add/Update keyframe at current time"
+                >
+                  <Star className="w-3 h-3" fill={paddingKeyframes.some(kf => Math.abs(kf.timeMs - currentTime * 1000) < 50) ? 'currentColor' : 'none'} />
+                </button>
+                {paddingKeyframes.length > 0 && (
+                  <button
+                    onClick={() => {
+                      onPaddingKeyframesChange?.([]);
+                      toast.info('All keyframes cleared');
+                    }}
+                    className="p-1 rounded hover:bg-white/10 text-red-400 transition-colors"
+                    title="Clear all keyframes"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+                <span className="text-[10px] text-slate-400 font-mono ml-1">{padding}%</span>
+              </div>
             </div>
             <Slider
               value={[padding]}
               onValueChange={(values) => onPaddingChange?.(values[0])}
               min={0}
               max={100}
+              step={1}
+              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+            />
+            {paddingKeyframes.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {[...paddingKeyframes].sort((a, b) => a.timeMs - b.timeMs).map(kf => (
+                  <button
+                    key={kf.id}
+                    onClick={() => {
+                      const updated = paddingKeyframes.filter(k => k.id !== kf.id);
+                      onPaddingKeyframesChange?.(updated);
+                    }}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
+                    title={`${(kf.timeMs / 1000).toFixed(1)}s: ${kf.value}% - Click to remove`}
+                  >
+                    {(kf.timeMs / 1000).toFixed(1)}s
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2.5 mt-2">
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-slate-200">Position X</div>
+              <span className="text-[10px] text-slate-400 font-mono">{Math.round(screenOffsetX)}%</span>
+            </div>
+            <Slider
+              value={[screenOffsetX]}
+              onValueChange={(values) => onScreenOffsetChange?.({ x: values[0] })}
+              min={-50}
+              max={50}
+              step={1}
+              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+            />
+          </div>
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-slate-200">Position Y</div>
+              <span className="text-[10px] text-slate-400 font-mono">{Math.round(screenOffsetY)}%</span>
+            </div>
+            <Slider
+              value={[screenOffsetY]}
+              onValueChange={(values) => onScreenOffsetChange?.({ y: values[0] })}
+              min={-50}
+              max={50}
               step={1}
               className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
             />
@@ -1029,6 +1163,272 @@ export function SettingsPanel({
           </button>
         </div>
       </div>
+        </TabsContent>
+        <TabsContent value="overlays" className="mt-0 space-y-4">
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-slate-200">Overlay Videos</div>
+              <span className="text-[10px] text-slate-400 font-mono">
+                {overlayAssets.length} assets - {overlayCount} on timeline
+              </span>
+            </div>
+            <Button
+              type="button"
+              onClick={onOverlayAssetAdd}
+              className="w-full gap-2 bg-white/5 text-slate-200 border border-white/10 hover:bg-[#34B27B] hover:text-white hover:border-[#34B27B] transition-all"
+              variant="outline"
+            >
+              <Upload className="w-4 h-4" />
+              Upload Video
+            </Button>
+            <p className="text-[11px] text-slate-500">
+              Drag a video to the timeline overlay row, or tap Add to place at the playhead.
+            </p>
+          </div>
+          {selectedOverlay && onOverlayRegionChange && (
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Selected Overlay</div>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {Math.round(selectedOverlay.borderRadius ?? 0)}px
+                </span>
+              </div>
+              <div className="grid gap-3">
+                <div>
+                  <div className="text-[11px] text-slate-400 mb-1">Corner Radius</div>
+                  <Slider
+                    value={[selectedOverlay.borderRadius ?? 0]}
+                    onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { borderRadius: values[0] })}
+                    min={0}
+                    max={32}
+                    step={1}
+                    className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                  />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400 mb-1">Fit</div>
+                  <Select
+                    value={selectedOverlay.fit ?? 'contain'}
+                    onValueChange={(value) => onOverlayRegionChange(selectedOverlay.id, { fit: value as OverlayVideoFit })}
+                  >
+                    <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-9 text-xs">
+                      <SelectValue placeholder="Select fit" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1a1c] border-white/10 text-slate-200">
+                      <SelectItem value="contain">Fit (no crop)</SelectItem>
+                      <SelectItem value="cover">Fill (crop)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[11px] text-slate-400 mb-2">Source Crop</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-[10px] text-slate-500 mb-1">X: {selectedOverlay.crop?.x ?? 0}%</div>
+                      <Slider
+                        value={[selectedOverlay.crop?.x ?? 0]}
+                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
+                          crop: { 
+                            x: values[0], 
+                            y: selectedOverlay.crop?.y ?? 0, 
+                            width: Math.min(selectedOverlay.crop?.width ?? 100, 100 - values[0]), 
+                            height: selectedOverlay.crop?.height ?? 100 
+                          } 
+                        })}
+                        min={0}
+                        max={90}
+                        step={1}
+                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500 mb-1">Y: {selectedOverlay.crop?.y ?? 0}%</div>
+                      <Slider
+                        value={[selectedOverlay.crop?.y ?? 0]}
+                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
+                          crop: { 
+                            x: selectedOverlay.crop?.x ?? 0, 
+                            y: values[0], 
+                            width: selectedOverlay.crop?.width ?? 100, 
+                            height: Math.min(selectedOverlay.crop?.height ?? 100, 100 - values[0]) 
+                          } 
+                        })}
+                        min={0}
+                        max={90}
+                        step={1}
+                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500 mb-1">Width: {selectedOverlay.crop?.width ?? 100}%</div>
+                      <Slider
+                        value={[selectedOverlay.crop?.width ?? 100]}
+                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
+                          crop: { 
+                            x: selectedOverlay.crop?.x ?? 0, 
+                            y: selectedOverlay.crop?.y ?? 0, 
+                            width: values[0], 
+                            height: selectedOverlay.crop?.height ?? 100 
+                          } 
+                        })}
+                        min={10}
+                        max={100 - (selectedOverlay.crop?.x ?? 0)}
+                        step={1}
+                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500 mb-1">Height: {selectedOverlay.crop?.height ?? 100}%</div>
+                      <Slider
+                        value={[selectedOverlay.crop?.height ?? 100]}
+                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
+                          crop: { 
+                            x: selectedOverlay.crop?.x ?? 0, 
+                            y: selectedOverlay.crop?.y ?? 0, 
+                            width: selectedOverlay.crop?.width ?? 100, 
+                            height: values[0] 
+                          } 
+                        })}
+                        min={10}
+                        max={100 - (selectedOverlay.crop?.y ?? 0)}
+                        step={1}
+                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                      />
+                    </div>
+                  </div>
+                  {(selectedOverlay.crop && (selectedOverlay.crop.x !== 0 || selectedOverlay.crop.y !== 0 || selectedOverlay.crop.width !== 100 || selectedOverlay.crop.height !== 100)) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="w-full mt-2 text-xs text-slate-400 hover:text-white"
+                      onClick={() => onOverlayRegionChange(selectedOverlay.id, { crop: { x: 0, y: 0, width: 100, height: 100 } })}
+                    >
+                      Reset Crop
+                    </Button>
+                  )}
+                </div>
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[11px] text-slate-400 mb-2">Transition Effects</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-[10px] text-slate-500 mb-1">Enter Effect</div>
+                      <Select
+                        value={selectedOverlay.enterEffect ?? 'none'}
+                        onValueChange={(value) => onOverlayRegionChange(selectedOverlay.id, { enterEffect: value as OverlayEffect })}
+                      >
+                        <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-8 text-xs">
+                          <SelectValue placeholder="None" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#1a1a1c] border-white/10 text-slate-200">
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="fade">Fade</SelectItem>
+                          <SelectItem value="pixel">Pixel</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500 mb-1">Exit Effect</div>
+                      <Select
+                        value={selectedOverlay.exitEffect ?? 'none'}
+                        onValueChange={(value) => onOverlayRegionChange(selectedOverlay.id, { exitEffect: value as OverlayEffect })}
+                      >
+                        <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-8 text-xs">
+                          <SelectValue placeholder="None" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#1a1a1c] border-white/10 text-slate-200">
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="fade">Fade</SelectItem>
+                          <SelectItem value="pixel">Pixel</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {(selectedOverlay.enterEffect !== 'none' || selectedOverlay.exitEffect !== 'none') && (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      {selectedOverlay.enterEffect && selectedOverlay.enterEffect !== 'none' && (
+                        <div>
+                          <div className="text-[10px] text-slate-500 mb-1">Fade In: {selectedOverlay.fadeInMs ?? 300}ms</div>
+                          <Slider
+                            value={[selectedOverlay.fadeInMs ?? 300]}
+                            onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { fadeInMs: values[0] })}
+                            min={100}
+                            max={1500}
+                            step={50}
+                            className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                          />
+                        </div>
+                      )}
+                      {selectedOverlay.exitEffect && selectedOverlay.exitEffect !== 'none' && (
+                        <div>
+                          <div className="text-[10px] text-slate-500 mb-1">Fade Out: {selectedOverlay.fadeOutMs ?? 300}ms</div>
+                          <Slider
+                            value={[selectedOverlay.fadeOutMs ?? 300]}
+                            onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { fadeOutMs: values[0] })}
+                            min={100}
+                            max={1500}
+                            step={50}
+                            className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Adjust crop to show only a portion of the source video.
+              </p>
+            </div>
+          )}
+          <div className="grid gap-2">
+            {overlayAssets.length === 0 ? (
+              <div className="text-xs text-slate-500 text-center py-6 border border-dashed border-white/10 rounded-xl">
+                No overlay videos yet
+              </div>
+            ) : (
+              overlayAssets.map((asset) => (
+                <div
+                  key={asset.id}
+                  className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-3"
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('application/x-overlay-asset', asset.id);
+                    event.dataTransfer.effectAllowed = 'copy';
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs text-slate-200 truncate">{asset.name}</div>
+                    <div className="text-[10px] text-slate-500">
+                      {(asset.durationMs / 1000).toFixed(1)}s
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-slate-200 hover:text-white hover:bg-white/10"
+                      onClick={() => onOverlayAddToTimeline?.(asset.id)}
+                    >
+                      Add
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                      onClick={() => onOverlayAssetRemove?.(asset.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

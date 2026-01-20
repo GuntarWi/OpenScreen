@@ -81,11 +81,26 @@ export function computeEffectState(effectRegions: EffectRegion[] = [], timeMs: n
       const targetRoll = region.rollDeg ?? 0;
       const targetScale = region.scale ?? 1;
 
-      // Animate from neutral (0deg / 1x) into the configured values across the region
-      const animatedTiltX = targetTiltX * eased;
-      const animatedTiltY = targetTiltY * eased;
-      const animatedRoll = targetRoll * eased;
-      const animatedScaleDelta = (targetScale - 1) * eased;
+      // Animate: IN (0→target) in first 30%, HOLD in middle 40%, OUT (target→0) in last 30%
+      const inEnd = 0.3;
+      const outStart = 0.7;
+      let effectStrength: number;
+      
+      if (progress < inEnd) {
+        // Animate IN: 0 → 1 over first 30%
+        effectStrength = smoothStep(progress / inEnd);
+      } else if (progress > outStart) {
+        // Animate OUT: 1 → 0 over last 30%
+        effectStrength = smoothStep((1 - progress) / (1 - outStart));
+      } else {
+        // HOLD at full strength in middle
+        effectStrength = 1;
+      }
+
+      const animatedTiltX = targetTiltX * effectStrength;
+      const animatedTiltY = targetTiltY * effectStrength;
+      const animatedRoll = targetRoll * effectStrength;
+      const animatedScaleDelta = (targetScale - 1) * effectStrength;
 
       totalWeight += weight;
       sumTiltX += animatedTiltX * weight;

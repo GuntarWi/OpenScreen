@@ -1,6 +1,6 @@
 
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -17,6 +17,9 @@ import {
   DEFAULT_ZOOM_DEPTH,
   clampFocusToDepth,
   DEFAULT_CROP_REGION,
+  DEFAULT_SCREEN_OFFSET,
+  DEFAULT_OVERLAY_POSITION,
+  DEFAULT_OVERLAY_SIZE,
   DEFAULT_ANNOTATION_POSITION,
   DEFAULT_ANNOTATION_SIZE,
   DEFAULT_ANNOTATION_STYLE,
@@ -30,16 +33,21 @@ import {
   type TrimRegion,
   type ClipSegment,
   type AnnotationRegion,
+  type OverlayVideoAsset,
+  type OverlayVideoRegion,
   type EffectRegion,
   type CropRegion,
+  type ScreenOffset,
   type FigureData,
   type CursorTrack,
   type CursorStyle,
   type CursorSmoothing,
   type End2EndParams,
+  type PaddingKeyframe,
 } from "./types";
+import { interpolatePadding } from "@/utils/paddingKeyframes";
 import { VideoExporter, type ExportProgress, type ExportQuality } from "@/lib/exporter";
-import { type AspectRatio, getAspectRatioValue } from "@/utils/aspectRatioUtils";
+import { type AspectRatio, getAspectRatioValue, getResolutionPreset } from "@/utils/aspectRatioUtils";
 import { getAssetPath } from "@/lib/assetPath";
 
 const WALLPAPER_COUNT = 18;
@@ -59,7 +67,9 @@ export default function VideoEditor() {
   const [motionBlurEnabled, setMotionBlurEnabled] = useState(true);
   const [borderRadius, setBorderRadius] = useState(0);
   const [padding, setPadding] = useState(50);
+  const [paddingKeyframes, setPaddingKeyframes] = useState<PaddingKeyframe[]>([]);
   const [cropRegion, setCropRegion] = useState<CropRegion>(DEFAULT_CROP_REGION);
+  const [screenOffset, setScreenOffset] = useState<ScreenOffset>(DEFAULT_SCREEN_OFFSET);
   const [zoomRegions, setZoomRegions] = useState<ZoomRegion[]>([]);
   const [selectedZoomId, setSelectedZoomId] = useState<string | null>(null);
   const [clipSegments, setClipSegments] = useState<ClipSegment[]>([]);
@@ -70,6 +80,9 @@ export default function VideoEditor() {
   const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
   const [annotationRegions, setAnnotationRegions] = useState<AnnotationRegion[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [overlayAssets, setOverlayAssets] = useState<OverlayVideoAsset[]>([]);
+  const [overlayRegions, setOverlayRegions] = useState<OverlayVideoRegion[]>([]);
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
   const [cursorTrack, setCursorTrack] = useState<CursorTrack | null>(null);
   const [selectedCursorId, setSelectedCursorId] = useState<string | null>(null);
   const [cursorEnabled, setCursorEnabled] = useState<boolean>(true);
@@ -87,6 +100,7 @@ export default function VideoEditor() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
+  const [resolutionPresetId, setResolutionPresetId] = useState<string>('auto');
   const [exportQuality, setExportQuality] = useState<ExportQuality>('good');
 
   // Project save/load state
@@ -101,8 +115,16 @@ export default function VideoEditor() {
   const nextEffectIdRef = useRef(1);
   const nextAnnotationIdRef = useRef(1);
   const nextAnnotationZIndexRef = useRef(1); // Track z-index for stacking order
+  const nextOverlayAssetIdRef = useRef(1);
+  const nextOverlayIdRef = useRef(1);
+  const nextOverlayZIndexRef = useRef(1);
   const exporterRef = useRef<VideoExporter | null>(null);
   const lastVideoPathRef = useRef<string | null>(null);
+
+  // Compute current padding from keyframes (for preview)
+  const currentPadding = useMemo(() => {
+    return interpolatePadding(paddingKeyframes, currentTime * 1000, padding);
+  }, [paddingKeyframes, currentTime, padding]);
 
   // Helper to convert file path to proper file:// URL
   const toFileUrl = (filePath: string): string => {
@@ -149,6 +171,8 @@ export default function VideoEditor() {
       zoomRegions,
       effectRegions,
       annotationRegions,
+      overlayAssets,
+      overlayRegions,
 
       // Cursor Data
       cursorTrack,
@@ -164,7 +188,9 @@ export default function VideoEditor() {
       motionBlurEnabled,
       borderRadius,
       padding,
+      paddingKeyframes,
       cropRegion,
+      screenOffset,
 
       // Export Settings
       aspectRatio,
@@ -177,16 +203,19 @@ export default function VideoEditor() {
         nextTrimId: nextTrimIdRef.current,
         nextEffectId: nextEffectIdRef.current,
         nextAnnotationId: nextAnnotationIdRef.current,
-        nextAnnotationZIndex: nextAnnotationZIndexRef.current
+        nextAnnotationZIndex: nextAnnotationZIndexRef.current,
+        nextOverlayAssetId: nextOverlayAssetIdRef.current,
+        nextOverlayId: nextOverlayIdRef.current,
+        nextOverlayZIndex: nextOverlayZIndexRef.current,
       }
     };
 
     return JSON.stringify(project, null, 2);
   }, [
     videoFilePath, duration, clipSegments, zoomRegions, effectRegions,
-    annotationRegions, cursorTrack, cursorEnabled, cursorSmoothing,
+    annotationRegions, overlayAssets, overlayRegions, cursorTrack, cursorEnabled, cursorSmoothing,
     quadraticSmoothingStrength, end2endParams, wallpaper, shadowIntensity,
-    showBlur, motionBlurEnabled, borderRadius, padding, cropRegion,
+    showBlur, motionBlurEnabled, borderRadius, padding, paddingKeyframes, cropRegion, screenOffset,
     aspectRatio, exportQuality
   ]);
 
@@ -229,6 +258,8 @@ export default function VideoEditor() {
       setZoomRegions(project.zoomRegions || []);
       setEffectRegions(project.effectRegions || []);
       setAnnotationRegions(project.annotationRegions || []);
+      setOverlayAssets(project.overlayAssets || []);
+      setOverlayRegions(project.overlayRegions || []);
 
       // Restore cursor data
       setCursorTrack(project.cursorTrack);
@@ -250,7 +281,13 @@ export default function VideoEditor() {
       setMotionBlurEnabled(project.motionBlurEnabled ?? true);
       setBorderRadius(project.borderRadius ?? 0);
       setPadding(project.padding ?? 50);
+      setPaddingKeyframes(project.paddingKeyframes || []);
       setCropRegion(project.cropRegion || DEFAULT_CROP_REGION);
+      if (project.screenOffset && typeof project.screenOffset.x === 'number' && typeof project.screenOffset.y === 'number') {
+        setScreenOffset({ x: project.screenOffset.x, y: project.screenOffset.y });
+      } else {
+        setScreenOffset(DEFAULT_SCREEN_OFFSET);
+      }
 
       // Restore export settings
       setAspectRatio(project.aspectRatio || '16:9');
@@ -264,6 +301,9 @@ export default function VideoEditor() {
         nextEffectIdRef.current = project.idCounters.nextEffectId;
         nextAnnotationIdRef.current = project.idCounters.nextAnnotationId;
         nextAnnotationZIndexRef.current = project.idCounters.nextAnnotationZIndex;
+        nextOverlayAssetIdRef.current = project.idCounters.nextOverlayAssetId || nextOverlayAssetIdRef.current;
+        nextOverlayIdRef.current = project.idCounters.nextOverlayId || nextOverlayIdRef.current;
+        nextOverlayZIndexRef.current = project.idCounters.nextOverlayZIndex || nextOverlayZIndexRef.current;
       }
 
       setHasUnsavedChanges(false);
@@ -461,10 +501,10 @@ export default function VideoEditor() {
     // Mark as having unsaved changes whenever state changes
     setHasUnsavedChanges(true);
   }, [
-    videoPath, clipSegments, zoomRegions, effectRegions, annotationRegions,
+    videoPath, clipSegments, zoomRegions, effectRegions, annotationRegions, overlayAssets, overlayRegions,
     cursorTrack, cursorEnabled, cursorSmoothing, wallpaper,
     shadowIntensity, showBlur, motionBlurEnabled, borderRadius,
-    padding, cropRegion, aspectRatio, exportQuality
+    padding, cropRegion, screenOffset, aspectRatio, exportQuality
   ]);
 
   // Auto-save functionality
@@ -528,6 +568,7 @@ export default function VideoEditor() {
     if (id) setSelectedCursorId(null);
     if (id) setSelectedEffectId(null);
     if (id) setSelectedClipId(null);
+    if (id) setSelectedOverlayId(null);
   }, []);
 
   const handleSelectClip = useCallback((id: string | null) => {
@@ -538,6 +579,7 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedOverlayId(null);
     }
   }, []);
 
@@ -549,6 +591,7 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedOverlayId(null);
     }
   }, []);
 
@@ -560,6 +603,19 @@ export default function VideoEditor() {
       setSelectedClipId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedOverlayId(null);
+    }
+  }, []);
+
+  const handleSelectOverlay = useCallback((id: string | null) => {
+    setSelectedOverlayId(id);
+    if (id) {
+      setSelectedZoomId(null);
+      setSelectedTrimId(null);
+      setSelectedClipId(null);
+      setSelectedCursorId(null);
+      setSelectedEffectId(null);
+      setSelectedAnnotationId(null);
     }
   }, []);
 
@@ -571,6 +627,7 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
       setSelectedClipId(null);
       setSelectedCursorId(null);
+      setSelectedOverlayId(null);
     }
   }, []);
 
@@ -982,6 +1039,204 @@ export default function VideoEditor() {
     );
   }, []);
 
+  const loadOverlayMetadata = useCallback((src: string) => {
+    return new Promise<{ durationMs: number; width: number; height: number }>((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      if (src.startsWith('http')) {
+        video.crossOrigin = 'anonymous';
+      }
+
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        const durationMs = Math.max(0, Math.round((video.duration || 0) * 1000));
+        resolve({
+          durationMs,
+          width: video.videoWidth || 0,
+          height: video.videoHeight || 0,
+        });
+      };
+      const rejectOnce = () => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('Failed to load overlay metadata'));
+      };
+
+      video.addEventListener('loadedmetadata', resolveOnce, { once: true });
+      video.addEventListener('error', rejectOnce, { once: true });
+      video.src = src;
+      try {
+        video.load();
+      } catch {
+        // Ignore load errors for browsers that auto-load on src assignment.
+      }
+
+      if (video.readyState >= 1) {
+        resolveOnce();
+      }
+    });
+  }, []);
+
+  const handleAddOverlayAssets = useCallback(async () => {
+    const pickerResult = await (
+      window.electronAPI.openVideoFilesPicker
+        ? window.electronAPI.openVideoFilesPicker()
+        : window.electronAPI.openVideoFilePicker()
+    );
+
+    if (!pickerResult.success) return;
+
+    const paths = 'paths' in pickerResult && Array.isArray(pickerResult.paths)
+      ? pickerResult.paths
+      : pickerResult.path
+      ? [pickerResult.path]
+      : [];
+
+    if (!paths.length) return;
+
+    for (const path of paths) {
+      const src = toFileUrl(path);
+      if (overlayAssets.some((asset) => asset.src === src)) {
+        continue;
+      }
+      try {
+        const meta = await loadOverlayMetadata(src);
+        const asset: OverlayVideoAsset = {
+          id: `overlay-asset-${nextOverlayAssetIdRef.current++}`,
+          name: getBasename(path),
+          src,
+          durationMs: meta.durationMs,
+          width: meta.width,
+          height: meta.height,
+        };
+        setOverlayAssets((prev) => [...prev, asset]);
+      } catch (error) {
+        console.warn('Failed to load overlay metadata:', error);
+      }
+    }
+  }, [loadOverlayMetadata, overlayAssets, toFileUrl]);
+
+  const handleRemoveOverlayAsset = useCallback((assetId: string) => {
+    setOverlayAssets((prev) => prev.filter((asset) => asset.id !== assetId));
+    setOverlayRegions((prev) => prev.filter((region) => region.assetId !== assetId));
+    if (selectedOverlayId) {
+      const stillExists = overlayRegions.some((region) => region.id === selectedOverlayId && region.assetId !== assetId);
+      if (!stillExists) setSelectedOverlayId(null);
+    }
+  }, [overlayRegions, selectedOverlayId]);
+
+  const handleAddOverlayRegion = useCallback((assetId: string, startOverrideMs?: number) => {
+    const asset = overlayAssets.find((item) => item.id === assetId);
+    if (!asset) return;
+
+    const startMs = Math.max(0, Math.round(startOverrideMs ?? currentTime * 1000));
+    const preferredDuration = asset.durationMs > 0 ? asset.durationMs : 3000;
+    const durationMs = Math.max(100, preferredDuration);
+    const endMs = startMs + durationMs;
+
+    const newRegion: OverlayVideoRegion = {
+      id: `overlay-${nextOverlayIdRef.current++}`,
+      assetId,
+      startMs,
+      endMs,
+      position: { ...DEFAULT_OVERLAY_POSITION },
+      size: { ...DEFAULT_OVERLAY_SIZE },
+      zIndex: nextOverlayZIndexRef.current++,
+      borderRadius: 0,
+      fit: 'contain',
+    };
+
+    setOverlayRegions((prev) => [...prev, newRegion]);
+    handleSelectOverlay(newRegion.id);
+  }, [overlayAssets, currentTime, handleSelectOverlay]);
+
+  const handleOverlaySpanChange = useCallback((id: string, span: Span) => {
+    setOverlayRegions((prev) =>
+      prev.map((region) =>
+        region.id === id
+          ? { ...region, startMs: Math.round(span.start), endMs: Math.round(span.end) }
+          : region,
+      ),
+    );
+  }, []);
+
+  const handleOverlayDelete = useCallback((id: string) => {
+    setOverlayRegions((prev) => prev.filter((region) => region.id !== id));
+    if (selectedOverlayId === id) {
+      setSelectedOverlayId(null);
+    }
+  }, [selectedOverlayId]);
+
+  const handleOverlaySplit = useCallback(() => {
+    const playheadMs = Math.round(currentTime * 1000);
+    
+    // Find overlay region that contains the playhead
+    const target = overlayRegions.find(
+      (region) => playheadMs > region.startMs && playheadMs < region.endMs
+    );
+    
+    if (!target) {
+      toast.error('Place the playhead inside an overlay to split');
+      return;
+    }
+
+    const firstId = `overlay-region-${Date.now()}-1`;
+    const secondId = `overlay-region-${Date.now()}-2`;
+
+    const first: OverlayVideoRegion = {
+      ...target,
+      id: firstId,
+      endMs: playheadMs,
+    };
+    
+    const second: OverlayVideoRegion = {
+      ...target,
+      id: secondId,
+      startMs: playheadMs,
+    };
+
+    setOverlayRegions((prev) => {
+      const remaining = prev.filter((region) => region.id !== target.id);
+      return [...remaining, first, second].sort((a, b) => a.startMs - b.startMs);
+    });
+    
+    setSelectedOverlayId(secondId);
+  }, [currentTime, overlayRegions]);
+
+  const handleOverlayPositionChange = useCallback((id: string, position: { x: number; y: number }) => {
+    setOverlayRegions((prev) =>
+      prev.map((region) =>
+        region.id === id
+          ? { ...region, position }
+          : region,
+      ),
+    );
+  }, []);
+
+  const handleOverlaySizeChange = useCallback((id: string, size: { width: number; height: number }) => {
+    setOverlayRegions((prev) =>
+      prev.map((region) =>
+        region.id === id
+          ? { ...region, size }
+          : region,
+      ),
+    );
+  }, []);
+
+  const handleOverlayRegionChange = useCallback((id: string, patch: Partial<OverlayVideoRegion>) => {
+    setOverlayRegions((prev) =>
+      prev.map((region) =>
+        region.id === id
+          ? { ...region, ...patch }
+          : region,
+      ),
+    );
+  }, []);
+
   const handleSelectCursor = useCallback((id: string | null) => {
     setSelectedCursorId(id);
     if (id) {
@@ -989,6 +1244,7 @@ export default function VideoEditor() {
       setSelectedTrimId(null);
       setSelectedAnnotationId(null);
       setSelectedEffectId(null);
+      setSelectedOverlayId(null);
     }
   }, []);
 
@@ -1106,7 +1362,27 @@ export default function VideoEditor() {
       let exportHeight: number;
       let bitrate: number;
 
-      if (exportQuality === 'source') {
+      // Check if a specific resolution preset is selected
+      const resolutionPreset = getResolutionPreset(aspectRatio, resolutionPresetId);
+      const hasCustomResolution = resolutionPreset && resolutionPreset.id !== 'auto' && resolutionPreset.width > 0;
+
+      if (hasCustomResolution && resolutionPreset) {
+        // Use the selected resolution preset
+        exportWidth = resolutionPreset.width;
+        exportHeight = resolutionPreset.height;
+        
+        // Calculate bitrate based on resolution
+        const totalPixels = exportWidth * exportHeight;
+        if (totalPixels <= 1280 * 720) {
+          bitrate = 10_000_000; // 10 Mbps for 720p
+        } else if (totalPixels <= 1920 * 1080) {
+          bitrate = 20_000_000; // 20 Mbps for 1080p
+        } else if (totalPixels <= 2560 * 1440) {
+          bitrate = 50_000_000; // 50 Mbps for 1440p
+        } else {
+          bitrate = 80_000_000; // 80 Mbps for 4K
+        }
+      } else if (exportQuality === 'source') {
         // Use source resolution
         exportWidth = sourceWidth;
         exportHeight = sourceHeight;
@@ -1204,8 +1480,12 @@ export default function VideoEditor() {
         motionBlurEnabled,
         borderRadius,
         padding,
+        paddingKeyframes,
         cropRegion,
+        screenOffset,
         annotationRegions,
+        overlayAssets,
+        overlayRegions,
         effectRegions,
         previewWidth,
         previewHeight,
@@ -1249,7 +1529,7 @@ export default function VideoEditor() {
       setIsExporting(false);
       exporterRef.current = null;
     }
-  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, annotationRegions, effectRegions, isPlaying, aspectRatio, exportQuality]);
+  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, paddingKeyframes, cropRegion, screenOffset, annotationRegions, overlayAssets, overlayRegions, effectRegions, isPlaying, aspectRatio, resolutionPresetId, exportQuality]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {
@@ -1316,6 +1596,9 @@ export default function VideoEditor() {
     setZoomRegions([]);
     setEffectRegions([]);
     setAnnotationRegions([]);
+    setOverlayAssets([]);
+    setOverlayRegions([]);
+    setSelectedOverlayId(null);
     setCursorTrack(null);
     setCurrentProjectPath(null);
     setHasUnsavedChanges(false);
@@ -1327,6 +1610,9 @@ export default function VideoEditor() {
     nextEffectIdRef.current = 1;
     nextAnnotationIdRef.current = 1;
     nextAnnotationZIndexRef.current = 1;
+    nextOverlayAssetIdRef.current = 1;
+    nextOverlayIdRef.current = 1;
+    nextOverlayZIndexRef.current = 1;
 
     toast.success('New project created');
   }, [toFileUrl]);
@@ -1425,7 +1711,8 @@ export default function VideoEditor() {
                       showBlur={showBlur}
                       motionBlurEnabled={motionBlurEnabled}
                       borderRadius={borderRadius}
-                      padding={padding}
+                      padding={currentPadding}
+                      screenOffset={screenOffset}
                       cropRegion={cropRegion}
                       trimRegions={trimRegions}
                       effectRegions={effectRegions}
@@ -1435,6 +1722,12 @@ export default function VideoEditor() {
                       onSelectAnnotation={handleSelectAnnotation}
                       onAnnotationPositionChange={handleAnnotationPositionChange}
                       onAnnotationSizeChange={handleAnnotationSizeChange}
+                      overlayAssets={overlayAssets}
+                      overlayRegions={overlayRegions}
+                      selectedOverlayId={selectedOverlayId}
+                      onSelectOverlay={handleSelectOverlay}
+                      onOverlayPositionChange={handleOverlayPositionChange}
+                      onOverlaySizeChange={handleOverlaySizeChange}
                     cursorTrack={cursorTrack}
                     cursorEnabled={cursorEnabled}
                       cursorSmoothing={cursorSmoothing}
@@ -1493,6 +1786,14 @@ export default function VideoEditor() {
               onAnnotationDelete={handleAnnotationDelete}
               selectedAnnotationId={selectedAnnotationId}
               onSelectAnnotation={handleSelectAnnotation}
+              overlayAssets={overlayAssets}
+              overlayRegions={overlayRegions}
+              onOverlaySpanChange={handleOverlaySpanChange}
+              onOverlayDelete={handleOverlayDelete}
+              onOverlaySplit={handleOverlaySplit}
+              selectedOverlayId={selectedOverlayId}
+              onSelectOverlay={handleSelectOverlay}
+              onOverlayAssetDrop={handleAddOverlayRegion}
               cursorTrack={cursorTrack}
               selectedCursorId={selectedCursorId}
               onSelectCursor={handleSelectCursor}
@@ -1502,6 +1803,9 @@ export default function VideoEditor() {
               onCursorSmoothingChange={setCursorSmoothing}
               aspectRatio={aspectRatio}
               onAspectRatioChange={setAspectRatio}
+              resolutionPresetId={resolutionPresetId}
+              onResolutionPresetChange={setResolutionPresetId}
+              paddingKeyframes={paddingKeyframes}
             />
               </div>
             </Panel>
@@ -1528,6 +1832,18 @@ export default function VideoEditor() {
           onBorderRadiusChange={setBorderRadius}
           padding={padding}
           onPaddingChange={setPadding}
+          paddingKeyframes={paddingKeyframes}
+          onPaddingKeyframesChange={setPaddingKeyframes}
+          currentTime={currentTime}
+          screenOffset={screenOffset}
+          onScreenOffsetChange={(patch) => setScreenOffset(prev => ({ ...prev, ...patch }))}
+          overlayAssets={overlayAssets}
+          overlayRegions={overlayRegions}
+          selectedOverlayId={selectedOverlayId}
+          onOverlayAssetAdd={handleAddOverlayAssets}
+          onOverlayAssetRemove={handleRemoveOverlayAsset}
+          onOverlayAddToTimeline={handleAddOverlayRegion}
+          onOverlayRegionChange={handleOverlayRegionChange}
           cropRegion={cropRegion}
           onCropChange={setCropRegion}
           aspectRatio={aspectRatio}

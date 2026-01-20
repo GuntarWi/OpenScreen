@@ -89,6 +89,7 @@ export function AnnotationContentView({ annotation }: { annotation: AnnotationRe
             alt={annotation.emojiAlt || "Emoji"}
             className="w-full h-full object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.25)]"
             draggable={false}
+            style={{ outline: 'none', border: 'none' }}
           />
         );
       }
@@ -223,6 +224,7 @@ export function AnnotationOverlay({
         border: isSelected ? '2px solid rgba(52, 178, 123, 0.8)' : 'none',
         backgroundColor: isSelected ? 'rgba(52, 178, 123, 0.1)' : 'transparent',
         boxShadow: isSelected ? '0 0 0 1px rgba(52, 178, 123, 0.35)' : 'none',
+        outline: 'none',
       }}
       enableResizing={isSelected}
       disableDragging={!isSelected}
@@ -267,6 +269,10 @@ export function AnnotationOverlay({
           bottom: '-6px',
           cursor: 'nwse-resize',
         },
+        top: { display: 'none' },
+        bottom: { display: 'none' },
+        left: { display: 'none' },
+        right: { display: 'none' },
       }}
     >
       <div

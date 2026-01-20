@@ -1,7 +1,7 @@
 import { useItem } from "dnd-timeline";
 import type { Span } from "dnd-timeline";
 import { cn } from "@/lib/utils";
-import { ZoomIn, Scissors, MessageSquare, MousePointer2, Sparkles, Clapperboard } from "lucide-react";
+import { ZoomIn, Scissors, MessageSquare, MousePointer2, Sparkles, Clapperboard, Video } from "lucide-react";
 import glassStyles from "./ItemGlass.module.css";
 
 interface ItemProps {
@@ -12,7 +12,7 @@ interface ItemProps {
   isSelected?: boolean;
   onSelect?: () => void;
   zoomDepth?: number;
-  variant?: 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip';
+  variant?: 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'overlay';
   annotationType?: 'text' | 'image' | 'figure' | 'emoji';
 }
 
@@ -46,6 +46,7 @@ export default function Item({
   const isZoom = variant === 'zoom';
   const isTrim = variant === 'trim';
   const isClip = variant === 'clip';
+  const isOverlay = variant === 'overlay';
   const isCursor = variant === 'cursor';
   const isEffect = variant === 'effect';
   
@@ -54,6 +55,8 @@ export default function Item({
     : isTrim 
     ? glassStyles.glassRed 
     : isClip
+    ? glassStyles.glassPurple
+    : isOverlay
     ? glassStyles.glassPurple
     : isCursor
     ? glassStyles.glassBlue
@@ -66,6 +69,8 @@ export default function Item({
     : isTrim 
     ? '#ef4444' 
     : isClip
+    ? '#7c3aed'
+    : isOverlay
     ? '#7c3aed'
     : isCursor
     ? '#4C8BF5'
@@ -124,6 +129,13 @@ export default function Item({
             ) : isClip ? (
               <>
                 <Clapperboard className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-semibold tracking-tight">
+                  {children}
+                </span>
+              </>
+            ) : isOverlay ? (
+              <>
+                <Video className="w-3.5 h-3.5" />
                 <span className="text-[11px] font-semibold tracking-tight">
                   {children}
                 </span>

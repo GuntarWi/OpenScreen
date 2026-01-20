@@ -2,7 +2,7 @@ import type { ExportConfig, ExportProgress, ExportResult } from './types';
 import { VideoFileDecoder } from './videoDecoder';
 import { FrameRenderer } from './frameRenderer';
 import { VideoMuxer } from './muxer';
-import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion, EffectRegion } from '@/components/video-editor/types';
+import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion, EffectRegion, ScreenOffset, OverlayVideoAsset, OverlayVideoRegion, PaddingKeyframe } from '@/components/video-editor/types';
 
 interface VideoExporterConfig extends ExportConfig {
   videoUrl: string;
@@ -15,9 +15,13 @@ interface VideoExporterConfig extends ExportConfig {
   motionBlurEnabled?: boolean;
   borderRadius?: number;
   padding?: number;
+  paddingKeyframes?: PaddingKeyframe[];
   videoPadding?: number;
   cropRegion: CropRegion;
+  screenOffset?: ScreenOffset;
   annotationRegions?: AnnotationRegion[];
+  overlayAssets?: OverlayVideoAsset[];
+  overlayRegions?: OverlayVideoRegion[];
   effectRegions?: EffectRegion[];
   previewWidth?: number;
   previewHeight?: number;
@@ -74,6 +78,26 @@ export class VideoExporter {
     return sourceTimeMs;
   }
 
+  private mapSourceToEffectiveTime(sourceTimeMs: number): number {
+    const trimRegions = this.config.trimRegions || [];
+    const sortedTrims = [...trimRegions].sort((a, b) => a.startMs - b.startMs);
+
+    let effectiveTimeMs = sourceTimeMs;
+
+    for (const trim of sortedTrims) {
+      if (sourceTimeMs >= trim.endMs) {
+        effectiveTimeMs -= (trim.endMs - trim.startMs);
+      } else if (sourceTimeMs > trim.startMs) {
+        effectiveTimeMs -= (sourceTimeMs - trim.startMs);
+        break;
+      } else {
+        break;
+      }
+    }
+
+    return Math.max(0, effectiveTimeMs);
+  }
+
   async export(): Promise<ExportResult> {
     try {
       this.cleanup();
@@ -95,10 +119,14 @@ export class VideoExporter {
         motionBlurEnabled: this.config.motionBlurEnabled,
         borderRadius: this.config.borderRadius,
         padding: this.config.padding,
+        paddingKeyframes: this.config.paddingKeyframes,
         cropRegion: this.config.cropRegion,
+        screenOffset: this.config.screenOffset,
         videoWidth: videoInfo.width,
         videoHeight: videoInfo.height,
         annotationRegions: this.config.annotationRegions,
+        overlayAssets: this.config.overlayAssets,
+        overlayRegions: this.config.overlayRegions,
         effectRegions: this.config.effectRegions,
         previewWidth: this.config.previewWidth,
         previewHeight: this.config.previewHeight,
@@ -120,16 +148,33 @@ export class VideoExporter {
 
       // Calculate effective duration and frame count (excluding trim regions)
       const effectiveDuration = this.getEffectiveDuration(videoInfo.duration);
-      const totalFrames = Math.ceil(effectiveDuration * this.config.frameRate);
+      const overlayMaxEndMs = (this.config.overlayRegions || []).reduce(
+        (max, region) => Math.max(max, region.endMs),
+        0,
+      );
+      const videoDurationMs = Math.max(0, Math.round(videoInfo.duration * 1000));
+      const overlayEffectiveEndMs = overlayMaxEndMs > 0
+        ? overlayMaxEndMs <= videoDurationMs
+          ? this.mapSourceToEffectiveTime(overlayMaxEndMs)
+          : (effectiveDuration * 1000) + (overlayMaxEndMs - videoDurationMs)
+        : 0;
+      const exportDuration = Math.max(effectiveDuration, overlayEffectiveEndMs / 1000);
+      const totalFrames = Math.ceil(exportDuration * this.config.frameRate);
       
       console.log('[VideoExporter] Original duration:', videoInfo.duration, 's');
       console.log('[VideoExporter] Effective duration:', effectiveDuration, 's');
+      console.log('[VideoExporter] Export duration:', exportDuration, 's');
       console.log('[VideoExporter] Total frames to export:', totalFrames);
 
       // Process frames continuously without batching delays
       const frameDuration = 1_000_000 / this.config.frameRate; // in microseconds
       let frameIndex = 0;
       const timeStep = 1 / this.config.frameRate;
+      const effectiveDurationMs = Math.max(0, effectiveDuration * 1000);
+      const finalSourceTimeMs = effectiveDurationMs > 0
+        ? this.mapEffectiveToSourceTime(effectiveDurationMs)
+        : 0;
+      const maxVideoTime = Math.max(0, videoInfo.duration - 0.001);
 
       while (frameIndex < totalFrames && !this.cancelled) {
         const i = frameIndex;
@@ -137,8 +182,15 @@ export class VideoExporter {
 
         // Map effective time to source time (accounting for trim regions)
         const effectiveTimeMs = (i * timeStep) * 1000;
-        const sourceTimeMs = this.mapEffectiveToSourceTime(effectiveTimeMs);
-        const videoTime = sourceTimeMs / 1000;
+        const sourceTimeMs = effectiveTimeMs <= effectiveDurationMs
+          ? this.mapEffectiveToSourceTime(effectiveTimeMs)
+          : finalSourceTimeMs;
+        const renderTimeMs = effectiveTimeMs <= effectiveDurationMs
+          ? sourceTimeMs
+          : finalSourceTimeMs + (effectiveTimeMs - effectiveDurationMs);
+        const videoTime = maxVideoTime > 0
+          ? Math.min(Math.max(sourceTimeMs / 1000, 0), maxVideoTime)
+          : 0;
           
         // Seek if needed or wait for first frame to be ready
         const needsSeek = Math.abs(videoElement.currentTime - videoTime) > 0.001;
@@ -164,8 +216,8 @@ export class VideoExporter {
         });
 
         // Render the frame with all effects using source timestamp
-        const sourceTimestamp = sourceTimeMs * 1000; // Convert to microseconds
-        await this.renderer!.renderFrame(videoFrame, sourceTimestamp);
+        const renderTimestamp = renderTimeMs * 1000; // Convert to microseconds
+        await this.renderer!.renderFrame(videoFrame, renderTimestamp);
         
         videoFrame.close();
 

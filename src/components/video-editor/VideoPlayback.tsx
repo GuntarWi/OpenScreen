@@ -17,11 +17,14 @@ import {
   type ZoomDepth,
   type TrimRegion,
   type AnnotationRegion,
+  type OverlayVideoAsset,
+  type OverlayVideoRegion,
   type CursorTrack,
   DEFAULT_CURSOR_STYLE,
   type CursorSmoothing,
   type End2EndParams,
   type EffectRegion,
+  type ScreenOffset,
 } from "./types";
 import { extractPausePointsFromDisplayEvents, evaluatePositionOnCRByTime, sampleCRPath } from "./end2endSmoother";
 import { DEFAULT_FOCUS, SMOOTHING_FACTOR, MIN_DELTA } from "./videoPlayback/constants";
@@ -34,6 +37,7 @@ import { applyZoomTransform } from "./videoPlayback/zoomTransform";
 import { createVideoEventHandlers } from "./videoPlayback/videoEventHandlers";
 import { type AspectRatio, formatAspectRatioForCSS } from "@/utils/aspectRatioUtils";
 import { AnnotationContentView, AnnotationOverlay } from "./AnnotationOverlay";
+import { OverlayVideoItem } from "./OverlayVideoItem";
 import { computeEffectState, DEFAULT_EFFECT_STATE, type CombinedEffectState } from "./videoPlayback/effectUtils";
 
 interface VideoPlaybackProps {
@@ -55,6 +59,7 @@ interface VideoPlaybackProps {
   motionBlurEnabled?: boolean;
   borderRadius?: number;
   padding?: number;
+  screenOffset?: ScreenOffset;
   cropRegion?: import('./types').CropRegion;
   trimRegions?: TrimRegion[];
   aspectRatio: AspectRatio;
@@ -65,6 +70,12 @@ interface VideoPlaybackProps {
   onSelectAnnotation?: (id: string | null) => void;
   onAnnotationPositionChange?: (id: string, position: { x: number; y: number }) => void;
   onAnnotationSizeChange?: (id: string, size: { width: number; height: number }) => void;
+  overlayAssets?: OverlayVideoAsset[];
+  overlayRegions?: OverlayVideoRegion[];
+  selectedOverlayId?: string | null;
+  onSelectOverlay?: (id: string | null) => void;
+  onOverlayPositionChange?: (id: string, position: { x: number; y: number }) => void;
+  onOverlaySizeChange?: (id: string, size: { width: number; height: number }) => void;
   cursorTrack?: CursorTrack | null;
   cursorEnabled?: boolean;
   cursorSmoothing?: CursorSmoothing;
@@ -107,6 +118,7 @@ function VideoPlayback(
     motionBlurEnabled = true,
     borderRadius = 0,
     padding = 50,
+    screenOffset = { x: 0, y: 0 },
     cropRegion,
     trimRegions = [],
     aspectRatio,
@@ -117,11 +129,17 @@ function VideoPlayback(
     onSelectAnnotation,
     onAnnotationPositionChange,
     onAnnotationSizeChange,
-  cursorTrack,
+    overlayAssets = [],
+    overlayRegions = [],
+    selectedOverlayId,
+    onSelectOverlay,
+    onOverlayPositionChange,
+    onOverlaySizeChange,
+    cursorTrack,
     cursorEnabled = true,
-  cursorSmoothing = 'none',
-  quadraticSmoothingStrength,
-  end2endParams,
+    cursorSmoothing = 'none',
+    quadraticSmoothingStrength,
+    end2endParams,
   // Zoom follow props
   zoomFollowEnabled = false,
   zoomFollowMode = 'center',
@@ -140,12 +158,19 @@ function VideoPlayback(
   const [pixiReady, setPixiReady] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const overlayVideoLayerRef = useRef<HTMLDivElement | null>(null);
   const screenGroupRef = useRef<HTMLDivElement | null>(null);
   const midgroundRef = useRef<HTMLDivElement | null>(null);
   const focusIndicatorRef = useRef<HTMLDivElement | null>(null);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cursorImageRef = useRef<HTMLImageElement | null>(null);
   const currentTimeRef = useRef(0);
+  const overlayEndMsRef = useRef(0);
+  const videoDurationMsRef = useRef(0);
+  const extendedPlaybackRef = useRef(false);
+  const extendedPlaybackRafRef = useRef<number | null>(null);
+  const extendedPlaybackStartRef = useRef(0);
+  const extendedPlaybackBaseMsRef = useRef(0);
   const zoomRegionsRef = useRef<ZoomRegion[]>([]);
   const selectedZoomIdRef = useRef<string | null>(null);
   const effectRegionsRef = useRef<EffectRegion[]>([]);
@@ -173,6 +198,55 @@ function VideoPlayback(
   const CURSOR_TRAIL_MS = 500;
   const CURSOR_CLICK_MS = 280;
   const RAD_TO_DEG = 180 / Math.PI;
+
+  const cancelExtendedPlayback = useCallback(() => {
+    extendedPlaybackRef.current = false;
+    if (extendedPlaybackRafRef.current !== null) {
+      cancelAnimationFrame(extendedPlaybackRafRef.current);
+      extendedPlaybackRafRef.current = null;
+    }
+  }, []);
+
+  const stopExtendedPlayback = useCallback((finalTimeMs?: number) => {
+    cancelExtendedPlayback();
+    if (typeof finalTimeMs === 'number') {
+      currentTimeRef.current = finalTimeMs;
+      onTimeUpdate(finalTimeMs / 1000);
+    }
+    isPlayingRef.current = false;
+    onPlayStateChange(false);
+  }, [cancelExtendedPlayback, onPlayStateChange, onTimeUpdate]);
+
+  const startExtendedPlayback = useCallback((startMs: number, endMs: number) => {
+    cancelExtendedPlayback();
+    if (endMs <= startMs) {
+      stopExtendedPlayback(endMs);
+      return;
+    }
+
+    extendedPlaybackRef.current = true;
+    extendedPlaybackBaseMsRef.current = startMs;
+    extendedPlaybackStartRef.current = performance.now();
+    isPlayingRef.current = true;
+    onPlayStateChange(true);
+
+    const tick = (now: number) => {
+      if (!extendedPlaybackRef.current) return;
+      const elapsed = now - extendedPlaybackStartRef.current;
+      const nextMs = extendedPlaybackBaseMsRef.current + elapsed;
+      const clampedMs = Math.min(nextMs, endMs);
+      currentTimeRef.current = clampedMs;
+      onTimeUpdate(clampedMs / 1000);
+
+      if (clampedMs >= endMs) {
+        stopExtendedPlayback(endMs);
+        return;
+      }
+      extendedPlaybackRafRef.current = requestAnimationFrame(tick);
+    };
+
+    extendedPlaybackRafRef.current = requestAnimationFrame(tick);
+  }, [cancelExtendedPlayback, onPlayStateChange, onTimeUpdate, stopExtendedPlayback]);
 
   const applyEffectTransform = useCallback((state: CombinedEffectState) => {
     const group = screenGroupRef.current;
@@ -214,6 +288,39 @@ function VideoPlayback(
       group.style.transform = `perspective(${perspective}px) translate3d(${offsetX}px, ${offsetY}px, 0) rotateX(${rotXDeg}deg) rotateY(${rotYDeg}deg) rotate(${rollDeg}deg) scale(${scale})`;
     }
   }, [RAD_TO_DEG]);
+
+  const applyZoomToOverlays = useCallback((zoomScale: number, focusX: number, focusY: number) => {
+    const overlayLayer = overlayVideoLayerRef.current;
+    const annotationLayer = overlayRef.current;
+    
+    if (zoomScale === 1 && focusX === 0.5 && focusY === 0.5) {
+      // No zoom - reset transform
+      if (overlayLayer) {
+        overlayLayer.style.transform = '';
+        overlayLayer.style.transformOrigin = '';
+      }
+      if (annotationLayer) {
+        annotationLayer.style.transform = '';
+        annotationLayer.style.transformOrigin = '';
+      }
+      return;
+    }
+
+    // Apply zoom transform centered on focus point
+    const originX = focusX * 100;
+    const originY = focusY * 100;
+    const transform = `scale(${zoomScale})`;
+    const transformOrigin = `${originX}% ${originY}%`;
+
+    if (overlayLayer) {
+      overlayLayer.style.transform = transform;
+      overlayLayer.style.transformOrigin = transformOrigin;
+    }
+    if (annotationLayer) {
+      annotationLayer.style.transform = transform;
+      annotationLayer.style.transformOrigin = transformOrigin;
+    }
+  }, []);
 
   // Load default cursor SVG image
   useEffect(() => {
@@ -502,6 +609,10 @@ function VideoPlayback(
     pause: () => {
       const video = videoRef.current;
       allowPlaybackRef.current = false;
+      if (extendedPlaybackRef.current) {
+        stopExtendedPlayback(currentTimeRef.current);
+        return;
+      }
       if (!video) {
         return;
       }
@@ -1321,7 +1432,12 @@ function VideoPlayback(
     layoutVideoContent();
     video.pause();
 
-    const { handlePlay, handlePause, handleSeeked, handleSeeking } = createVideoEventHandlers({
+    const {
+      handlePlay,
+      handlePause: handlePauseBase,
+      handleSeeked: handleSeekedBase,
+      handleSeeking: handleSeekingBase,
+    } = createVideoEventHandlers({
       video,
       isSeekingRef,
       isPlayingRef,
@@ -1332,19 +1448,48 @@ function VideoPlayback(
       onTimeUpdate,
       trimRegionsRef,
     });
+
+    const handlePause = () => {
+      cancelExtendedPlayback();
+      handlePauseBase();
+    };
+
+    const handleSeeked = () => {
+      cancelExtendedPlayback();
+      handleSeekedBase();
+    };
+
+    const handleSeeking = () => {
+      cancelExtendedPlayback();
+      handleSeekingBase();
+    };
+
+    const handleEnded = () => {
+      const overlayEndMs = overlayEndMsRef.current;
+      const videoDurationMs = videoDurationMsRef.current || Math.round(video.duration * 1000);
+      const shouldExtend = overlayEndMs > videoDurationMs;
+
+      if (shouldExtend && isPlayingRef.current) {
+        startExtendedPlayback(videoDurationMs, overlayEndMs);
+        return;
+      }
+
+      handlePause();
+    };
     
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
-    video.addEventListener('ended', handlePause);
+    video.addEventListener('ended', handleEnded);
     video.addEventListener('seeked', handleSeeked);
     video.addEventListener('seeking', handleSeeking);
     
     return () => {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
-      video.removeEventListener('ended', handlePause);
+      video.removeEventListener('ended', handleEnded);
       video.removeEventListener('seeked', handleSeeked);
       video.removeEventListener('seeking', handleSeeking);
+      cancelExtendedPlayback();
       
       if (timeUpdateAnimationRef.current) {
         cancelAnimationFrame(timeUpdateAnimationRef.current);
@@ -1369,7 +1514,7 @@ function VideoPlayback(
       
       videoSpriteRef.current = null;
     };
-  }, [pixiReady, videoReady, onTimeUpdate, updateOverlayForRegion]);
+  }, [pixiReady, videoReady, onTimeUpdate, onPlayStateChange, updateOverlayForRegion, cancelExtendedPlayback, startExtendedPlayback]);
 
   useEffect(() => {
     if (!pixiReady || !videoReady) return;
@@ -1619,6 +1764,7 @@ function VideoPlayback(
 
       applyTransform(motionIntensity);
       applyEffectTransform(effectState);
+      applyZoomToOverlays(state.scale, state.focusX, state.focusY);
     };
 
     app.ticker.add(ticker);
@@ -1627,11 +1773,12 @@ function VideoPlayback(
         app.ticker.remove(ticker);
       }
     };
-  }, [pixiReady, videoReady, clampFocusToStage, applyEffectTransform]);
+  }, [pixiReady, videoReady, clampFocusToStage, applyEffectTransform, applyZoomToOverlays]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     const video = e.currentTarget;
     onDurationChange(video.duration);
+    videoDurationMsRef.current = Math.max(0, video.duration * 1000);
     video.currentTime = 0;
     video.pause();
     allowPlaybackRef.current = false;
@@ -1715,6 +1862,17 @@ function VideoPlayback(
     : { background: resolvedWallpaper || '' };
 
   const timeMs = Math.round(currentTime * 1000);
+  const overlayAssetMap = useMemo(
+    () => new Map(overlayAssets.map((asset) => [asset.id, asset])),
+    [overlayAssets],
+  );
+  useEffect(() => {
+    currentTimeRef.current = currentTime * 1000;
+  }, [currentTime]);
+
+  useEffect(() => {
+    overlayEndMsRef.current = overlayRegions.reduce((max, region) => Math.max(max, region.endMs), 0);
+  }, [overlayRegions]);
   const getActiveAnnotations = (layer?: 'foreground' | 'midground') => {
     const filtered = (annotationRegions || []).filter((annotation) => {
       if (typeof annotation.startMs !== 'number' || typeof annotation.endMs !== 'number') return false;
@@ -1728,9 +1886,21 @@ function VideoPlayback(
     return [...filtered].sort((a, b) => a.zIndex - b.zIndex);
   };
 
+  const activeOverlayRegions = useMemo(() => {
+    if (!overlayRegions.length) return [];
+    return overlayRegions
+      .filter((region) => timeMs >= region.startMs && timeMs <= region.endMs)
+      .sort((a, b) => a.zIndex - b.zIndex);
+  }, [overlayRegions, timeMs]);
+
   const shadowFilter = (showShadow && shadowIntensity > 0)
     ? `drop-shadow(0 ${shadowIntensity * 12}px ${shadowIntensity * 48}px rgba(0,0,0,${shadowIntensity * 0.7})) drop-shadow(0 ${shadowIntensity * 4}px ${shadowIntensity * 16}px rgba(0,0,0,${shadowIntensity * 0.5})) drop-shadow(0 ${shadowIntensity * 2}px ${shadowIntensity * 8}px rgba(0,0,0,${shadowIntensity * 0.3}))`
     : 'none';
+  const screenOffsetX = screenOffset?.x ?? 0;
+  const screenOffsetY = screenOffset?.y ?? 0;
+  const screenOffsetStyle = (screenOffsetX || screenOffsetY)
+    ? { transform: `translate3d(${screenOffsetX}%, ${screenOffsetY}%, 0)` }
+    : undefined;
 
   return (
     <div className="relative rounded-sm overflow-hidden" style={{ width: '100%', aspectRatio: formatAspectRatioForCSS(aspectRatio) }}>
@@ -1744,131 +1914,168 @@ function VideoPlayback(
       />
 
       <div
-        ref={screenGroupRef}
-        className="absolute inset-0 will-change-transform"
-        style={{ filter: shadowFilter }}
+        className="absolute inset-0"
+        style={screenOffsetStyle}
       >
-        {pixiReady && videoReady && (
-          <div
-            ref={midgroundRef}
-            className="absolute inset-0 pointer-events-none"
-            style={{ zIndex: 1 }}
-          >
-            {getActiveAnnotations('midground').map((annotation) => {
-              const containerWidth = midgroundRef.current?.clientWidth || overlayRef.current?.clientWidth || 800;
-              const containerHeight = midgroundRef.current?.clientHeight || overlayRef.current?.clientHeight || 600;
-              const x = (annotation.position.x / 100) * containerWidth;
-              const y = (annotation.position.y / 100) * containerHeight;
-              const width = (annotation.size.width / 100) * containerWidth;
-              const height = (annotation.size.height / 100) * containerHeight;
-              const fadeInMs = annotation.fadeInMs ?? 240;
-              const fadeOutMs = annotation.fadeOutMs ?? 240;
-              const start = annotation.startMs ?? 0;
-              const end = annotation.endMs ?? 0;
-              const progressIn = Math.max(0, Math.min(1, fadeInMs > 0 ? (timeMs - start) / fadeInMs : 1));
-              const progressOut = Math.max(0, Math.min(1, fadeOutMs > 0 ? (end - timeMs) / fadeOutMs : 1));
-              const enterEffect = annotation.enterEffect || 'none';
-              const exitEffect = annotation.exitEffect || 'none';
-              const enterAlpha = enterEffect === 'fade' || enterEffect === 'pop' ? progressIn : 1;
-              const exitAlpha = exitEffect === 'fade' || exitEffect === 'pop' ? progressOut : 1;
-              const opacity = Math.max(0, Math.min(1, enterAlpha * exitAlpha));
-              let scale = 1;
-              if (enterEffect === 'pop') {
-                scale *= 0.82 + 0.18 * progressIn;
-              }
-              if (exitEffect === 'pop') {
-                scale *= 0.9 + 0.1 * progressOut;
-              }
-
-              return (
-                <div
-                  key={annotation.id}
-                  className="absolute"
-                  style={{
-                    left: x,
-                    top: y,
-                    width,
-                    height,
-                    zIndex: annotation.zIndex,
-                    pointerEvents: 'none',
-                    opacity,
-                    transform: `scale(${scale})`,
-                    transformOrigin: 'center',
-                  }}
-                >
-                  <AnnotationContentView annotation={annotation} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-
         <div
-          ref={containerRef}
-          className="absolute inset-0"
-          style={{ zIndex: 5 }}
-        />
-
-        {/* Only render overlay after PIXI and video are fully initialized */}
-        {pixiReady && videoReady && (
-          <div
-            ref={overlayRef}
-            className="absolute inset-0 select-none"
-            style={{ pointerEvents: 'none', zIndex: 10 }}
-            onPointerDown={handleOverlayPointerDown}
-            onPointerMove={handleOverlayPointerMove}
-            onPointerUp={handleOverlayPointerUp}
-            onPointerLeave={handleOverlayPointerLeave}
-          >
+          ref={screenGroupRef}
+          className="absolute inset-0 will-change-transform"
+          style={{ filter: shadowFilter }}
+        >
+          {pixiReady && videoReady && (
             <div
-              ref={focusIndicatorRef}
-              className="absolute rounded-md border border-[#34B27B]/80 bg-[#34B27B]/20 shadow-[0_0_0_1px_rgba(52,178,123,0.35)]"
-              style={{ display: 'none', pointerEvents: 'none' }}
-            />
-            {(() => {
-              const sorted = getActiveAnnotations();
-              
-              // Handle click-through cycling: when clicking same annotation, cycle to next
-              const handleAnnotationClick = (clickedId: string) => {
-                if (!onSelectAnnotation) return;
-                
-                if (clickedId === selectedAnnotationId && sorted.length > 1) {
-                  const currentIndex = sorted.findIndex(a => a.id === clickedId);
-                  const nextIndex = (currentIndex + 1) % sorted.length;
-                  onSelectAnnotation(sorted[nextIndex].id);
-                } else {
-                  onSelectAnnotation(clickedId);
+              ref={midgroundRef}
+              className="absolute inset-0 pointer-events-none"
+              style={{ zIndex: 1 }}
+            >
+              {getActiveAnnotations('midground').map((annotation) => {
+                const containerWidth = midgroundRef.current?.clientWidth || overlayRef.current?.clientWidth || 800;
+                const containerHeight = midgroundRef.current?.clientHeight || overlayRef.current?.clientHeight || 600;
+                const x = (annotation.position.x / 100) * containerWidth;
+                const y = (annotation.position.y / 100) * containerHeight;
+                const width = (annotation.size.width / 100) * containerWidth;
+                const height = (annotation.size.height / 100) * containerHeight;
+                const fadeInMs = annotation.fadeInMs ?? 240;
+                const fadeOutMs = annotation.fadeOutMs ?? 240;
+                const start = annotation.startMs ?? 0;
+                const end = annotation.endMs ?? 0;
+                const progressIn = Math.max(0, Math.min(1, fadeInMs > 0 ? (timeMs - start) / fadeInMs : 1));
+                const progressOut = Math.max(0, Math.min(1, fadeOutMs > 0 ? (end - timeMs) / fadeOutMs : 1));
+                const enterEffect = annotation.enterEffect || 'none';
+                const exitEffect = annotation.exitEffect || 'none';
+                const enterAlpha = enterEffect === 'fade' || enterEffect === 'pop' ? progressIn : 1;
+                const exitAlpha = exitEffect === 'fade' || exitEffect === 'pop' ? progressOut : 1;
+                const opacity = Math.max(0, Math.min(1, enterAlpha * exitAlpha));
+                let scale = 1;
+                if (enterEffect === 'pop') {
+                  scale *= 0.82 + 0.18 * progressIn;
                 }
-              };
-              
-              const overlayWidth = overlayRef.current?.clientWidth || 800;
-              const overlayHeight = overlayRef.current?.clientHeight || 600;
+                if (exitEffect === 'pop') {
+                  scale *= 0.9 + 0.1 * progressOut;
+                }
 
-              return sorted.map((annotation) => {
-                const annLayer = annotation.layer || 'foreground';
-                const isMidground = annLayer === 'midground';
                 return (
-                  <AnnotationOverlay
+                  <div
                     key={annotation.id}
-                    annotation={annotation}
-                    isSelected={annotation.id === selectedAnnotationId}
-                    containerWidth={overlayWidth}
-                    containerHeight={overlayHeight}
-                    onPositionChange={(id, position) => onAnnotationPositionChange?.(id, position)}
-                    onSizeChange={(id, size) => onAnnotationSizeChange?.(id, size)}
-                    onClick={handleAnnotationClick}
-                    zIndex={annotation.zIndex}
-                    isSelectedBoost={annotation.id === selectedAnnotationId}
-                    renderContent={!isMidground}
-                    ghostOpacity={isMidground ? 0.45 : 1}
-                    currentTimeMs={timeMs}
-                  />
+                    className="absolute"
+                    style={{
+                      left: x,
+                      top: y,
+                      width,
+                      height,
+                      zIndex: annotation.zIndex,
+                      pointerEvents: 'none',
+                      opacity,
+                      transform: `scale(${scale})`,
+                      transformOrigin: 'center',
+                    }}
+                  >
+                    <AnnotationContentView annotation={annotation} />
+                  </div>
                 );
-              });
-            })()}
-            <canvas ref={cursorCanvasRef} className="absolute inset-0" style={{ pointerEvents: 'none' }} />
-          </div>
-        )}
+              })}
+            </div>
+          )}
+
+          <div
+            ref={containerRef}
+            className="absolute inset-0"
+            style={{ zIndex: 5 }}
+          />
+
+          {pixiReady && videoReady && activeOverlayRegions.length > 0 && (
+            <div
+              ref={overlayVideoLayerRef}
+              className="absolute inset-0 select-none"
+              style={{ zIndex: 8, pointerEvents: selectedOverlayId && !isPlaying ? 'auto' : 'none' }}
+            >
+              {(() => {
+                const containerWidth = overlayVideoLayerRef.current?.clientWidth || overlayRef.current?.clientWidth || 800;
+                const containerHeight = overlayVideoLayerRef.current?.clientHeight || overlayRef.current?.clientHeight || 600;
+                return activeOverlayRegions.map((region) => {
+                  const asset = overlayAssetMap.get(region.assetId);
+                  if (!asset) return null;
+                  return (
+                    <OverlayVideoItem
+                      key={region.id}
+                      region={region}
+                      asset={asset}
+                      containerWidth={containerWidth}
+                      containerHeight={containerHeight}
+                      currentTimeMs={timeMs}
+                      isPlaying={isPlaying}
+                      isSelected={region.id === selectedOverlayId}
+                      onSelect={(id) => onSelectOverlay?.(id)}
+                      onPositionChange={(id, position) => onOverlayPositionChange?.(id, position)}
+                      onSizeChange={(id, size) => onOverlaySizeChange?.(id, size)}
+                    />
+                  );
+                });
+              })()}
+            </div>
+          )}
+
+          {/* Only render overlay after PIXI and video are fully initialized */}
+          {pixiReady && videoReady && (
+            <div
+              ref={overlayRef}
+              className="absolute inset-0 select-none"
+              style={{ pointerEvents: 'none', zIndex: 10 }}
+              onPointerDown={handleOverlayPointerDown}
+              onPointerMove={handleOverlayPointerMove}
+              onPointerUp={handleOverlayPointerUp}
+              onPointerLeave={handleOverlayPointerLeave}
+            >
+              <div
+                ref={focusIndicatorRef}
+                className="absolute rounded-md border border-[#34B27B]/80 bg-[#34B27B]/20 shadow-[0_0_0_1px_rgba(52,178,123,0.35)]"
+                style={{ display: 'none', pointerEvents: 'none' }}
+              />
+              {(() => {
+                const sorted = getActiveAnnotations();
+                
+                // Handle click-through cycling: when clicking same annotation, cycle to next
+                const handleAnnotationClick = (clickedId: string) => {
+                  if (!onSelectAnnotation) return;
+                  
+                  if (clickedId === selectedAnnotationId && sorted.length > 1) {
+                    const currentIndex = sorted.findIndex(a => a.id === clickedId);
+                    const nextIndex = (currentIndex + 1) % sorted.length;
+                    onSelectAnnotation(sorted[nextIndex].id);
+                  } else {
+                    onSelectAnnotation(clickedId);
+                  }
+                };
+                
+                const overlayWidth = overlayRef.current?.clientWidth || 800;
+                const overlayHeight = overlayRef.current?.clientHeight || 600;
+
+                return sorted.map((annotation) => {
+                  const annLayer = annotation.layer || 'foreground';
+                  const isMidground = annLayer === 'midground';
+                  return (
+                    <AnnotationOverlay
+                      key={annotation.id}
+                      annotation={annotation}
+                      isSelected={annotation.id === selectedAnnotationId}
+                      containerWidth={overlayWidth}
+                      containerHeight={overlayHeight}
+                      onPositionChange={(id, position) => onAnnotationPositionChange?.(id, position)}
+                      onSizeChange={(id, size) => onAnnotationSizeChange?.(id, size)}
+                      onClick={handleAnnotationClick}
+                      zIndex={annotation.zIndex}
+                      isSelectedBoost={annotation.id === selectedAnnotationId}
+                      renderContent={!isMidground}
+                      ghostOpacity={isMidground ? 0.45 : 1}
+                      currentTimeMs={timeMs}
+                    />
+                  );
+                });
+              })()}
+              <canvas ref={cursorCanvasRef} className="absolute inset-0" style={{ pointerEvents: 'none' }} />
+            </div>
+          )}
+        </div>
       </div>
 
       <video

@@ -389,6 +389,36 @@ export function registerIpcHandlers(
     }
   });
 
+  ipcMain.handle('open-video-files-picker', async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: 'Select Overlay Videos',
+        defaultPath: RECORDINGS_DIR,
+        filters: [
+          { name: 'Video Files', extensions: ['webm', 'mp4', 'mov', 'avi', 'mkv'] },
+          { name: 'All Files', extensions: ['*'] }
+        ],
+        properties: ['openFile', 'multiSelections']
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, cancelled: true };
+      }
+
+      return {
+        success: true,
+        paths: result.filePaths
+      };
+    } catch (error) {
+      console.error('Failed to open files picker:', error);
+      return {
+        success: false,
+        message: 'Failed to open files picker',
+        error: String(error)
+      };
+    }
+  });
+
   let currentVideoPath: string | null = null;
   let currentProjectPath: string | null = null;
 

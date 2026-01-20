@@ -53,6 +53,7 @@ interface Window {
       cancelled?: boolean
     }>
     openVideoFilePicker: () => Promise<{ success: boolean; path?: string; cancelled?: boolean }>
+    openVideoFilesPicker: () => Promise<{ success: boolean; paths?: string[]; cancelled?: boolean }>
     setCurrentVideoPath: (path: string) => Promise<{ success: boolean }>
     getCurrentVideoPath: () => Promise<{ success: boolean; path?: string }>
     clearCurrentVideoPath: () => Promise<{ success: boolean }>
