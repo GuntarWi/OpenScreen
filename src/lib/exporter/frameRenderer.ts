@@ -520,10 +520,20 @@ export class FrameRenderer {
         // Step 2: Apply crop percentages to the visible region
         // CSS transform: scale(100/width, 100/height) translate(-x*scaleX%, -y*scaleY%)
         // Crop offsets are relative to the full visible region (0-100%).
-        const srcX = visibleX + (crop.x / 100) * visibleW;
-        const srcY = visibleY + (crop.y / 100) * visibleH;
-        const srcW = (crop.width / 100) * visibleW;
-        const srcH = (crop.height / 100) * visibleH;
+        const cropWidth = Math.max(0.0001, crop.width);
+        const cropHeight = Math.max(0.0001, crop.height);
+        let srcX = visibleX + (crop.x / cropWidth) * visibleW;
+        let srcY = visibleY + (crop.y / cropHeight) * visibleH;
+        let srcW = (crop.width / 100) * visibleW;
+        let srcH = (crop.height / 100) * visibleH;
+        
+        // Apply a tiny epsilon shrink to avoid sampling outside the video edge.
+        // Keep math aligned to preview (no rounding) to prevent position/crop drift.
+        const epsilon = 0.01;
+        srcX = Math.max(0, srcX + epsilon);
+        srcY = Math.max(0, srcY + epsilon);
+        srcW = Math.max(0, Math.min(videoWidth - srcX, srcW - epsilon * 2));
+        srcH = Math.max(0, Math.min(videoHeight - srcY, srcH - epsilon * 2));
         
         // Step 3: Draw the cropped source to fill the destination box
         ctx.drawImage(video, srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
