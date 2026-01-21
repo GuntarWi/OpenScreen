@@ -381,7 +381,8 @@ export class FrameRenderer {
     timeMs: number,
     canvasWidth: number,
     canvasHeight: number,
-    zoomState?: { scale: number; focusX: number; focusY: number }
+    zoomState?: { scale: number; focusX: number; focusY: number },
+    screenOffsetPx?: { x: number; y: number }
   ): Promise<void> {
     const overlayRegions = this.config.overlayRegions || [];
     if (!overlayRegions.length) return;
@@ -391,6 +392,11 @@ export class FrameRenderer {
     const scaleX = canvasWidth / previewWidth;
     const scaleY = canvasHeight / previewHeight;
     const scaleFactor = (scaleX + scaleY) / 2;
+
+    // Apply screenOffset to overlay positions since overlays are drawn on compositeCanvas
+    // In preview, overlays are inside a container with screenOffset CSS transform
+    const offsetX = screenOffsetPx?.x ?? 0;
+    const offsetY = screenOffsetPx?.y ?? 0;
 
     // Apply zoom transform if active
     const zoomScale = zoomState?.scale ?? 1;
@@ -436,12 +442,31 @@ export class FrameRenderer {
       const video = await this.seekOverlayVideo(asset, localMs);
       if (!video || video.readyState < 2) continue;
 
-      const boxWidth = (region.size.width / 100) * canvasWidth;
-      const boxHeight = (region.size.height / 100) * canvasHeight;
+      // Calculate box dimensions - positions are percentages of preview, scale to export
+      const boxWidth = (region.size.width / 100) * previewWidth * scaleX;
+      const boxHeight = (region.size.height / 100) * previewHeight * scaleY;
       if (boxWidth <= 0 || boxHeight <= 0) continue;
 
-      const boxX = (region.position.x / 100) * canvasWidth;
-      const boxY = (region.position.y / 100) * canvasHeight;
+      // Overlay positions are percentages that represent the user's intended visual placement
+      // Add screenOffset since overlays move with the screen in preview
+      const boxX = (region.position.x / 100) * previewWidth * scaleX + offsetX;
+      const boxY = (region.position.y / 100) * previewHeight * scaleY + offsetY;
+
+      console.log('[Overlay Position Debug]', JSON.stringify({
+        regionPosition: region.position,
+        previewWidth,
+        previewHeight,
+        canvasWidth,
+        canvasHeight,
+        scaleX: scaleX.toFixed(4),
+        scaleY: scaleY.toFixed(4),
+        screenOffsetX: offsetX.toFixed(1),
+        screenOffsetY: offsetY.toFixed(1),
+        boxX: boxX.toFixed(1),
+        boxY: boxY.toFixed(1),
+        boxWidth: boxWidth.toFixed(1),
+        boxHeight: boxHeight.toFixed(1),
+      }));
 
       const videoWidth = video.videoWidth || asset.width || boxWidth;
       const videoHeight = video.videoHeight || asset.height || boxHeight;
@@ -450,51 +475,10 @@ export class FrameRenderer {
       const crop = region.crop;
       const hasCrop = crop && (crop.x !== 0 || crop.y !== 0 || crop.width !== 100 || crop.height !== 100);
       
-      // Source rectangle (from video)
-      const sx = hasCrop && crop ? (crop.x / 100) * videoWidth : 0;
-      const sy = hasCrop && crop ? (crop.y / 100) * videoHeight : 0;
-      const sw = hasCrop && crop ? (crop.width / 100) * videoWidth : videoWidth;
-      const sh = hasCrop && crop ? (crop.height / 100) * videoHeight : videoHeight;
-
-      const sourceAspect = sw / sh;
-      const boxAspect = boxWidth / boxHeight;
-
       const fit = region.fit ?? 'contain';
-      let drawWidth = boxWidth;
-      let drawHeight = boxHeight;
-      let drawX = boxX;
-      let drawY = boxY;
-
-      if (hasCrop) {
-        // When cropped, always fill the box (like 'cover' but from cropped source)
-        if (sourceAspect > boxAspect) {
-          drawWidth = boxHeight * sourceAspect;
-          drawX = boxX - (drawWidth - boxWidth) / 2;
-        } else if (sourceAspect < boxAspect) {
-          drawHeight = boxWidth / sourceAspect;
-          drawY = boxY - (drawHeight - boxHeight) / 2;
-        }
-      } else if (fit === 'cover') {
-        if (sourceAspect > boxAspect) {
-          drawWidth = boxHeight * sourceAspect;
-          drawX = boxX - (drawWidth - boxWidth) / 2;
-        } else if (sourceAspect < boxAspect) {
-          drawHeight = boxWidth / sourceAspect;
-          drawY = boxY - (drawHeight - boxHeight) / 2;
-        }
-      } else {
-        if (sourceAspect > boxAspect) {
-          drawHeight = boxWidth / sourceAspect;
-          drawY = boxY + (boxHeight - drawHeight) / 2;
-        } else if (sourceAspect < boxAspect) {
-          drawWidth = boxHeight * sourceAspect;
-          drawX = boxX + (boxWidth - drawWidth) / 2;
-        }
-      }
-
       const radiusPx = Math.max(0, (region.borderRadius ?? 0) * scaleFactor);
-      const needsClip = hasCrop || fit === 'cover' || radiusPx > 0;
 
+      
       ctx.save();
       
       // Apply zoom transform if active
@@ -506,12 +490,76 @@ export class FrameRenderer {
         ctx.translate(-originX, -originY);
       }
       
-      if (needsClip) {
-        ctx.beginPath();
-        addRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, radiusPx);
-        ctx.clip();
+      // Always clip to the box for border radius and overflow
+      ctx.beginPath();
+      addRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, radiusPx);
+      ctx.clip();
+
+      // Calculate aspect ratios
+      const videoAspect = videoWidth / videoHeight;
+      const boxAspect = boxWidth / boxHeight;
+
+      if (hasCrop && crop) {
+        // Use source rectangle extraction to match CSS object-fit:cover + crop transform
+        // Step 1: Calculate what portion of video is visible with object-fit: cover
+        let visibleX: number, visibleY: number, visibleW: number, visibleH: number;
+        if (videoAspect > boxAspect) {
+          // Video is wider than box - full height visible, width cropped from center
+          visibleH = videoHeight;
+          visibleW = videoHeight * boxAspect;
+          visibleX = (videoWidth - visibleW) / 2;
+          visibleY = 0;
+        } else {
+          // Video is taller than box - full width visible, height cropped from center
+          visibleW = videoWidth;
+          visibleH = videoWidth / boxAspect;
+          visibleX = 0;
+          visibleY = (videoHeight - visibleH) / 2;
+        }
+        
+        // Step 2: Apply crop percentages to the visible region
+        // CSS transform: scale(100/width, 100/height) translate(-x*scaleX%, -y*scaleY%)
+        // Crop offsets are relative to the full visible region (0-100%).
+        const srcX = visibleX + (crop.x / 100) * visibleW;
+        const srcY = visibleY + (crop.y / 100) * visibleH;
+        const srcW = (crop.width / 100) * visibleW;
+        const srcH = (crop.height / 100) * visibleH;
+        
+        // Step 3: Draw the cropped source to fill the destination box
+        ctx.drawImage(video, srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
+      } else if (fit === 'cover') {
+        // Object-fit: cover using source extraction (more precise than destination scaling)
+        let srcX: number, srcY: number, srcW: number, srcH: number;
+        if (videoAspect > boxAspect) {
+          // Video wider - crop sides
+          srcH = videoHeight;
+          srcW = videoHeight * boxAspect;
+          srcX = (videoWidth - srcW) / 2;
+          srcY = 0;
+        } else {
+          // Video taller - crop top/bottom
+          srcW = videoWidth;
+          srcH = videoWidth / boxAspect;
+          srcX = 0;
+          srcY = (videoHeight - srcH) / 2;
+        }
+        ctx.drawImage(video, srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
+      } else {
+        // Object-fit: contain - scale to fit within box, centered
+        let containW: number, containH: number, containX: number, containY: number;
+        if (videoAspect > boxAspect) {
+          containW = boxWidth;
+          containH = boxWidth / videoAspect;
+          containX = boxX;
+          containY = boxY + (boxHeight - containH) / 2;
+        } else {
+          containH = boxHeight;
+          containW = boxHeight * videoAspect;
+          containX = boxX + (boxWidth - containW) / 2;
+          containY = boxY;
+        }
+        ctx.drawImage(video, 0, 0, videoWidth, videoHeight, containX, containY, containW, containH);
       }
-      ctx.drawImage(video, sx, sy, sw, sh, drawX, drawY, drawWidth, drawHeight);
       ctx.restore();
     }
   }
@@ -803,7 +851,7 @@ export class FrameRenderer {
     ctx: CanvasRenderingContext2D,
     source: HTMLCanvasElement,
     effectState: CombinedEffectState
-  ): void {
+  ): { canvas: HTMLCanvasElement; offsetX: number; offsetY: number } {
     const w = source.width;
     const h = source.height;
     const project = this.createProjectionFunction(effectState, w, h);
@@ -814,7 +862,7 @@ export class FrameRenderer {
       ctx.setTransform(affine.a, affine.b, affine.c, affine.d, affine.e, affine.f);
       ctx.drawImage(source, 0, 0, w, h);
       ctx.restore();
-      return;
+      return { canvas: ctx.canvas as HTMLCanvasElement, offsetX: 0, offsetY: 0 };
     }
 
     // Use a 2D grid of patches for proper perspective in both X and Y directions
@@ -834,6 +882,24 @@ export class FrameRenderer {
     yCoords[subdivisionsY] = h;
     const bleed = Math.min(3, Math.max(1, Math.round(Math.max(w, h) / 800)));
     const clipPad = Math.max(0.35, Math.min(1.25, bleed * 0.6));
+    const pad = Math.ceil(Math.max(2, clipPad + bleed + 1));
+
+    const projectedCorners = [project(0, 0), project(w, 0), project(0, h), project(w, h)];
+    let minX = projectedCorners[0].x;
+    let maxX = projectedCorners[0].x;
+    let minY = projectedCorners[0].y;
+    let maxY = projectedCorners[0].y;
+    for (const pt of projectedCorners) {
+      minX = Math.min(minX, pt.x);
+      maxX = Math.max(maxX, pt.x);
+      minY = Math.min(minY, pt.y);
+      maxY = Math.max(maxY, pt.y);
+    }
+
+    const offsetX = -minX + pad;
+    const offsetY = -minY + pad;
+    const outWidth = Math.max(1, Math.ceil(maxX - minX + pad * 2));
+    const outHeight = Math.max(1, Math.ceil(maxY - minY + pad * 2));
 
     const expandTriangle = (
       p0: { x: number; y: number },
@@ -858,8 +924,8 @@ export class FrameRenderer {
     // Create an intermediate canvas to render perspective without transparency issues
     // This prevents grid seams from showing through when there's transparency on top
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = w;
-    tempCanvas.height = h;
+    tempCanvas.width = outWidth;
+    tempCanvas.height = outHeight;
     const tempCtx = tempCanvas.getContext('2d')!;
 
     // Enable high-quality smoothing during patch rendering to maintain quality with zoom+perspective
@@ -877,10 +943,14 @@ export class FrameRenderer {
         if (sw <= 0 || sh <= 0) continue;
 
         // Project corners
-        const tl = project(sx, sy);
-        const tr = project(sx1, sy);
-        const bl = project(sx, sy1);
-        const br = project(sx1, sy1);
+        const tlRaw = project(sx, sy);
+        const trRaw = project(sx1, sy);
+        const blRaw = project(sx, sy1);
+        const brRaw = project(sx1, sy1);
+        const tl = { x: tlRaw.x + offsetX, y: tlRaw.y + offsetY };
+        const tr = { x: trRaw.x + offsetX, y: trRaw.y + offsetY };
+        const bl = { x: blRaw.x + offsetX, y: blRaw.y + offsetY };
+        const br = { x: brRaw.x + offsetX, y: brRaw.y + offsetY };
 
         // Bleed source pixels to avoid seams while clipping to the projected patch.
         const padLeft = Math.min(bleed, sx);
@@ -939,12 +1009,11 @@ export class FrameRenderer {
       }
     }
 
-    // Now draw the completed perspective canvas to the final context
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(tempCanvas, 0, 0);
-    ctx.restore();
+    return {
+      canvas: tempCanvas,
+      offsetX: minX - pad,
+      offsetY: minY - pad,
+    };
   }
 
   private updateAnimationState(timeMs: number): number {
@@ -1075,30 +1144,24 @@ export class FrameRenderer {
     screenCtx.drawImage(videoCanvas, 0, 0, w, h);
     screenCtx.filter = 'none';
 
-    if (this.config.overlayRegions && this.config.overlayRegions.length > 0) {
-      await this.drawOverlayVideos(screenCtx, timeMs, w, h, this.animationState);
-    }
-
-    if (this.config.annotationRegions && this.config.annotationRegions.length > 0) {
-      await renderAnnotations(
-        screenCtx,
-        this.config.annotationRegions,
-        this.config.width,
-        this.config.height,
-        timeMs,
-        scaleFactor,
-        'foreground'
-      );
-    }
+    // Note: Overlays are drawn AFTER the screen is composited to avoid clipping
+    // at screenCanvas boundaries when screenOffset moves content near edges.
 
     let finalScreen = this.screenCanvas;
+    let finalScreenOffsetX = 0;
+    let finalScreenOffsetY = 0;
     if (effectState.active) {
       const effectCtx = this.effectCtx;
       effectCtx.setTransform(1, 0, 0, 1, 0, 0);
       effectCtx.clearRect(0, 0, w, h);
-      this.drawScreenWithPerspective(effectCtx, this.screenCanvas, effectState);
-      finalScreen = this.effectCanvas;
+      const effectResult = this.drawScreenWithPerspective(effectCtx, this.screenCanvas, effectState);
+      finalScreen = effectResult.canvas;
+      finalScreenOffsetX = effectResult.offsetX;
+      finalScreenOffsetY = effectResult.offsetY;
     }
+
+    const drawX = screenOffsetX + finalScreenOffsetX;
+    const drawY = screenOffsetY + finalScreenOffsetY;
 
     if (this.config.showShadow && this.config.shadowIntensity > 0) {
       const intensity = this.config.shadowIntensity;
@@ -1111,10 +1174,30 @@ export class FrameRenderer {
       const baseOffset = 12 * intensity;
       ctx.save();
       ctx.filter = `drop-shadow(0 ${baseOffset}px ${baseBlur1}px rgba(0,0,0,${baseAlpha1})) drop-shadow(0 ${baseOffset/3}px ${baseBlur2}px rgba(0,0,0,${baseAlpha2})) drop-shadow(0 ${baseOffset/6}px ${baseBlur3}px rgba(0,0,0,${baseAlpha3}))`;
-      ctx.drawImage(finalScreen, screenOffsetX, screenOffsetY, w, h);
+      ctx.drawImage(finalScreen, drawX, drawY);
       ctx.restore();
     } else {
-      ctx.drawImage(finalScreen, screenOffsetX, screenOffsetY, w, h);
+      ctx.drawImage(finalScreen, drawX, drawY);
+    }
+
+    // Draw overlays on composite canvas (not screenCanvas) to avoid clipping
+    // Overlays are drawn after screen so they appear on top of the main video
+    // Pass screenOffset so overlays move with the screen like in preview
+    if (this.config.overlayRegions && this.config.overlayRegions.length > 0) {
+      await this.drawOverlayVideos(ctx, timeMs, w, h, this.animationState, { x: screenOffsetX, y: screenOffsetY });
+    }
+
+    // Draw foreground annotations on composite canvas
+    if (this.config.annotationRegions && this.config.annotationRegions.length > 0) {
+      await renderAnnotations(
+        ctx,
+        this.config.annotationRegions,
+        this.config.width,
+        this.config.height,
+        timeMs,
+        scaleFactor,
+        'foreground'
+      );
     }
   }
 

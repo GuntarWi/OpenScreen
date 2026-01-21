@@ -17,8 +17,14 @@ interface OverlayVideoItemProps {
 }
 
 const HANDLE_COLOR = "#7c3aed";
-const PIXEL_GRID_ROWS = 6;
-const PIXEL_GRID_COLS = 8;
+const PIXEL_GRID_ROWS = 4;
+const PIXEL_GRID_COLS = 5;
+
+// Seeded random number generator for consistent but random-looking delays
+function seededRandom(seed: number) {
+  const x = Math.sin(seed * 9999) * 10000;
+  return x - Math.floor(x);
+}
 
 // Generate pixel grid pieces for the pixel effect
 function generatePixelPieces(rows: number, cols: number, seed: number) {
@@ -31,8 +37,9 @@ function generatePixelPieces(rows: number, cols: number, seed: number) {
         ${(col + 1) * (100 / cols)}% ${(row + 1) * (100 / rows)}%,
         ${col * (100 / cols)}% ${(row + 1) * (100 / rows)}%
       )`;
-      // Use seeded random for consistent delays
-      const delay = ((row * cols + col + seed) % (rows * cols)) / (rows * cols);
+      // Use seeded random for truly random-looking but consistent delays
+      const pieceSeed = seed + row * 100 + col * 7;
+      const delay = seededRandom(pieceSeed);
       pieces.push({ clipPath, delay });
     }
   }
@@ -61,6 +68,20 @@ export function OverlayVideoItem({
   const y = (region.position.y / 100) * containerHeight;
   const width = (region.size.width / 100) * containerWidth;
   const height = (region.size.height / 100) * containerHeight;
+
+  // Debug: Log preview position (once per region)
+  useEffect(() => {
+    console.log('[Preview Position Debug]', JSON.stringify({
+      regionId: region.id,
+      regionPosition: region.position,
+      containerWidth,
+      containerHeight,
+      x: x.toFixed(1),
+      y: y.toFixed(1),
+      width: width.toFixed(1),
+      height: height.toFixed(1),
+    }));
+  }, [region.id, region.position, containerWidth, containerHeight, x, y, width, height]);
 
   const isActive = currentTimeMs >= region.startMs && currentTimeMs <= region.endMs;
   const isVisible = isActive || isSelected;
@@ -120,8 +141,10 @@ export function OverlayVideoItem({
     return generatePixelPieces(PIXEL_GRID_ROWS, PIXEL_GRID_COLS, seed);
   }, [region.id, enterEffect, exitEffect]);
 
-  const usePixelEffect = (enterEffect === 'pixel' && effectState.isEntering) || 
-                         (exitEffect === 'pixel' && effectState.isExiting);
+  // Track pixel effect state for CSS transitions
+  const isPixelEntering = enterEffect === 'pixel' && effectState.isEntering;
+  const isPixelExiting = exitEffect === 'pixel' && effectState.isExiting;
+  const showPixelMask = enterEffect === 'pixel' || exitEffect === 'pixel';
 
   // Handle play/pause state sync
   useEffect(() => {
@@ -314,52 +337,63 @@ export function OverlayVideoItem({
             borderRadius,
           };
 
-          // Pixel effect rendering
-          if (usePixelEffect && pixelPieces.length > 0) {
-            return (
-              <div className="relative w-full h-full">
-                {pixelPieces.map((piece, index) => {
-                  // Calculate opacity based on progress and piece delay
-                  const pieceThreshold = piece.delay;
-                  const pieceOpacity = effectState.pixelProgress >= pieceThreshold 
-                    ? Math.min(1, (effectState.pixelProgress - pieceThreshold) / (1 - pieceThreshold + 0.1))
-                    : 0;
-                  
-                  return (
-                    <div
-                      key={index}
-                      className="absolute inset-0"
-                      style={{
-                        clipPath: piece.clipPath,
-                        opacity: pieceOpacity,
-                      }}
-                    >
-                      <video
-                        ref={index === 0 ? videoRef : undefined}
-                        src={asset.src}
-                        muted
-                        playsInline
-                        preload="auto"
-                        className="w-full h-full"
-                        style={videoStyle}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          }
+          // Pixel effect: single video with grid mask overlay using CSS transitions
+          // Determine mask state: entering = mask starts visible and fades out, exiting = mask fades in
+          const shouldShowMask = isPixelEntering || isPixelExiting;
+          const maskRevealed = isPixelEntering ? effectState.pixelProgress >= 0.99 : false;
+          const maskHidden = isPixelExiting ? effectState.pixelProgress <= 0.01 : true;
+          const transitionDuration = isPixelEntering ? fadeInMs : fadeOutMs;
           
           return (
-            <video
-              ref={videoRef}
-              src={asset.src}
-              muted
-              playsInline
-              preload="auto"
-              className="w-full h-full"
-              style={videoStyle}
-            />
+            <div className="relative w-full h-full">
+              <video
+                ref={videoRef}
+                src={asset.src}
+                muted
+                playsInline
+                preload="auto"
+                className="w-full h-full"
+                style={videoStyle}
+              />
+              {showPixelMask && pixelPieces.length > 0 && (
+                <div 
+                  className="absolute inset-0 pointer-events-none overflow-hidden" 
+                  style={{ borderRadius }}
+                >
+                  {pixelPieces.map((piece, index) => {
+                    // For entering: start at opacity 1 (hidden), transition to 0 (revealed)
+                    // For exiting: start at opacity 0 (revealed), transition to 1 (hidden)
+                    const delayMs = piece.delay * transitionDuration * 0.8;
+                    const pieceTransitionMs = transitionDuration * 0.5;
+                    
+                    let targetOpacity: number;
+                    if (isPixelEntering) {
+                      targetOpacity = maskRevealed ? 0 : 1;
+                    } else if (isPixelExiting) {
+                      targetOpacity = maskHidden ? 0 : 1;
+                    } else {
+                      // Not in effect - fully transparent (video visible)
+                      targetOpacity = 0;
+                    }
+                    
+                    return (
+                      <div
+                        key={index}
+                        className="absolute inset-0"
+                        style={{
+                          clipPath: piece.clipPath,
+                          backgroundColor: '#000',
+                          opacity: targetOpacity,
+                          transition: shouldShowMask 
+                            ? `opacity ${pieceTransitionMs}ms ease-out ${delayMs}ms` 
+                            : 'none',
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })()}
       </div>

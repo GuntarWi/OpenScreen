@@ -94,6 +94,7 @@ export interface VideoPlaybackRef {
   videoSprite: Sprite | null;
   videoContainer: Container | null;
   containerRef: React.RefObject<HTMLDivElement>;
+  overlayContainerRef: React.RefObject<HTMLDivElement>;
   play: () => Promise<void>;
   pause: () => void;
 }
@@ -595,6 +596,7 @@ function VideoPlayback(
     videoSprite: videoSpriteRef.current,
     videoContainer: videoContainerRef.current,
     containerRef,
+    overlayContainerRef: overlayVideoLayerRef,
     play: async () => {
       const vid = videoRef.current;
       if (!vid) return;
@@ -1983,13 +1985,14 @@ function VideoPlayback(
             style={{ zIndex: 5 }}
           />
 
-          {pixiReady && videoReady && activeOverlayRegions.length > 0 && (
+          {pixiReady && videoReady && (
             <div
               ref={overlayVideoLayerRef}
               className="absolute inset-0 select-none"
               style={{ zIndex: 8, pointerEvents: selectedOverlayId && !isPlaying ? 'auto' : 'none' }}
             >
               {(() => {
+                if (!activeOverlayRegions.length) return null;
                 const containerWidth = overlayVideoLayerRef.current?.clientWidth || overlayRef.current?.clientWidth || 800;
                 const containerHeight = overlayVideoLayerRef.current?.clientHeight || overlayRef.current?.clientHeight || 600;
                 return activeOverlayRegions.map((region) => {

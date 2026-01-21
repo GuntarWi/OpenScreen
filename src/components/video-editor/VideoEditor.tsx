@@ -1456,11 +1456,13 @@ export default function VideoEditor() {
       }
 
       // Get preview CONTAINER dimensions for scaling
-      // Annotations render in HTML overlay matching container, not PixiJS canvas
+      // Use overlayContainerRef for overlays to match preview rendering exactly
       const playbackRef = videoPlaybackRef.current;
+      const overlayContainer = playbackRef?.overlayContainerRef?.current;
       const containerElement = playbackRef?.containerRef?.current;
-      const previewWidth = containerElement?.clientWidth || 1920;
-      const previewHeight = containerElement?.clientHeight || 1080;
+      // Prefer overlay container dimensions for accurate overlay positioning
+      const previewWidth = overlayContainer?.clientWidth || containerElement?.clientWidth || 1920;
+      const previewHeight = overlayContainer?.clientHeight || containerElement?.clientHeight || 1080;
 
 
 
