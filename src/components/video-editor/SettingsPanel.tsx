@@ -1309,6 +1309,80 @@ export function SettingsPanel({
                   )}
                 </div>
                 <div className="pt-2 border-t border-white/5">
+                  <div className="text-[11px] text-slate-400 mb-2">Chroma Key (Green Screen)</div>
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10">
+                      <div className="text-xs text-slate-200">Enable</div>
+                      <Switch
+                        checked={Boolean(selectedOverlay.chromaKey?.enabled)}
+                        onCheckedChange={(value) => onOverlayRegionChange(selectedOverlay.id, {
+                          chromaKey: {
+                            enabled: Boolean(value),
+                            color: selectedOverlay.chromaKey?.color ?? '#00ff00',
+                            threshold: selectedOverlay.chromaKey?.threshold ?? 0.35,
+                            softness: selectedOverlay.chromaKey?.softness ?? 0.15,
+                          },
+                        })}
+                        className="data-[state=checked]:bg-[#34B27B]"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2 rounded-lg bg-white/5 border border-white/10">
+                        <div className="text-[10px] text-slate-400 mb-1">Key Color</div>
+                        <input
+                          type="color"
+                          value={selectedOverlay.chromaKey?.color ?? '#00ff00'}
+                          onChange={(e) => onOverlayRegionChange(selectedOverlay.id, {
+                            chromaKey: {
+                              enabled: selectedOverlay.chromaKey?.enabled ?? false,
+                              color: e.target.value,
+                              threshold: selectedOverlay.chromaKey?.threshold ?? 0.35,
+                              softness: selectedOverlay.chromaKey?.softness ?? 0.15,
+                            },
+                          })}
+                          className="w-full h-8 rounded bg-transparent border border-white/10"
+                        />
+                      </div>
+                      <div className="p-2 rounded-lg bg-white/5 border border-white/10">
+                        <div className="text-[10px] text-slate-400 mb-1">Threshold: {Math.round((selectedOverlay.chromaKey?.threshold ?? 0.35) * 100)}%</div>
+                        <Slider
+                          value={[selectedOverlay.chromaKey?.threshold ?? 0.35]}
+                          onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, {
+                            chromaKey: {
+                              enabled: selectedOverlay.chromaKey?.enabled ?? false,
+                              color: selectedOverlay.chromaKey?.color ?? '#00ff00',
+                              threshold: values[0],
+                              softness: selectedOverlay.chromaKey?.softness ?? 0.15,
+                            },
+                          })}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                        />
+                      </div>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white/5 border border-white/10">
+                      <div className="text-[10px] text-slate-400 mb-1">Softness: {Math.round((selectedOverlay.chromaKey?.softness ?? 0.15) * 100)}%</div>
+                      <Slider
+                        value={[selectedOverlay.chromaKey?.softness ?? 0.15]}
+                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, {
+                          chromaKey: {
+                            enabled: selectedOverlay.chromaKey?.enabled ?? false,
+                            color: selectedOverlay.chromaKey?.color ?? '#00ff00',
+                            threshold: selectedOverlay.chromaKey?.threshold ?? 0.35,
+                            softness: values[0],
+                          },
+                        })}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="pt-2 border-t border-white/5">
                   <div className="text-[11px] text-slate-400 mb-2">Transition Effects</div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>

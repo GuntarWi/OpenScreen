@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { Rnd } from "react-rnd";
 import { cn } from "@/lib/utils";
 import type { OverlayVideoAsset, OverlayVideoRegion } from "./types";
+import { applyChromaKeyToImageData, parseHexColor } from "@/utils/chromaKey";
 
 interface OverlayVideoItemProps {
   region: OverlayVideoRegion;
@@ -59,6 +60,7 @@ export function OverlayVideoItem({
   onSizeChange,
 }: OverlayVideoItemProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const chromaCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDraggingRef = useRef(false);
   const lastSyncTimeRef = useRef<number>(0);
   const wasPlayingRef = useRef(false);
@@ -87,6 +89,11 @@ export function OverlayVideoItem({
   const isVisible = isActive || isSelected;
   const borderRadius = region.borderRadius ?? 0;
   const fit = region.fit ?? "contain";
+  const chromaKey = region.chromaKey;
+  const chromaEnabled = Boolean(chromaKey?.enabled);
+  const chromaColor = chromaKey?.color ?? "#00ff00";
+  const chromaThreshold = chromaKey?.threshold ?? 0.35;
+  const chromaSoftness = chromaKey?.softness ?? 0.15;
 
   // Effect properties
   const enterEffect = region.enterEffect ?? 'none';
@@ -215,6 +222,52 @@ export function OverlayVideoItem({
       }
     }
   }, [isActive]);
+
+  useEffect(() => {
+    if (!chromaEnabled || !isVisible) return;
+    const video = videoRef.current;
+    const canvas = chromaCanvasRef.current;
+    if (!video || !canvas) return;
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    let rafId: number | null = null;
+
+    const drawFrame = () => {
+      const width = video.videoWidth || canvas.width;
+      const height = video.videoHeight || canvas.height;
+      if (!width || !height) return;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      ctx.drawImage(video, 0, 0, width, height);
+      const imageData = ctx.getImageData(0, 0, width, height);
+      applyChromaKeyToImageData(
+        imageData.data,
+        parseHexColor(chromaColor),
+        chromaThreshold,
+        chromaSoftness
+      );
+      ctx.putImageData(imageData, 0, 0);
+    };
+
+    if (isPlaying) {
+      const loop = () => {
+        drawFrame();
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    } else {
+      drawFrame();
+    }
+
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, [chromaEnabled, chromaColor, chromaThreshold, chromaSoftness, isPlaying, currentTimeMs, isVisible]);
 
   if (!isVisible) {
     return null;
@@ -353,8 +406,15 @@ export function OverlayVideoItem({
                 playsInline
                 preload="auto"
                 className="w-full h-full"
-                style={videoStyle}
+                style={chromaEnabled ? { ...videoStyle, opacity: 0, position: "absolute", inset: 0 } : videoStyle}
               />
+              {chromaEnabled && (
+                <canvas
+                  ref={chromaCanvasRef}
+                  className="w-full h-full"
+                  style={videoStyle}
+                />
+              )}
               {showPixelMask && pixelPieces.length > 0 && (
                 <div 
                   className="absolute inset-0 pointer-events-none overflow-hidden" 

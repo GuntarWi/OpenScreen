@@ -1148,6 +1148,12 @@ export default function VideoEditor() {
       zIndex: nextOverlayZIndexRef.current++,
       borderRadius: 0,
       fit: 'contain',
+      chromaKey: {
+        enabled: false,
+        color: '#00ff00',
+        threshold: 0.35,
+        softness: 0.15,
+      },
     };
 
     setOverlayRegions((prev) => [...prev, newRegion]);

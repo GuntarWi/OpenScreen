@@ -116,6 +116,13 @@ export interface OverlayVideoCrop {
   height: number; // crop height as percentage (0-100)
 }
 
+export interface OverlayChromaKey {
+  enabled: boolean;
+  color?: string; // hex color, e.g. #00ff00
+  threshold?: number; // 0-1
+  softness?: number; // 0-1
+}
+
 export const DEFAULT_OVERLAY_CROP: OverlayVideoCrop = {
   x: 0,
   y: 0,
@@ -136,6 +143,7 @@ export interface OverlayVideoRegion {
   borderRadius?: number;
   fit?: OverlayVideoFit;
   crop?: OverlayVideoCrop;
+  chromaKey?: OverlayChromaKey;
   enterEffect?: OverlayEffect;
   exitEffect?: OverlayEffect;
   fadeInMs?: number;

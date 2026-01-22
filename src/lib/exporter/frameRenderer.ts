@@ -7,6 +7,7 @@ import { applyZoomTransform } from '@/components/video-editor/videoPlayback/zoom
 import { DEFAULT_FOCUS, SMOOTHING_FACTOR, MIN_DELTA } from '@/components/video-editor/videoPlayback/constants';
 import { clampFocusToStage as clampFocusToStageUtil } from '@/components/video-editor/videoPlayback/focusUtils';
 import { renderAnnotations } from './annotationRenderer';
+import { applyChromaKeyToImageData, parseHexColor } from '@/utils/chromaKey';
 import { computeEffectState, type CombinedEffectState } from '@/components/video-editor/videoPlayback/effectUtils';
 
 const EFFECT_PERSPECTIVE = 1200;
@@ -70,6 +71,7 @@ export class FrameRenderer {
   private overlayVideos = new Map<string, HTMLVideoElement>();
   private overlayVideoReady = new Map<string, Promise<void>>();
   private overlayVideoTimes = new Map<string, number>();
+  private overlayChromaCanvases = new Map<string, HTMLCanvasElement>();
 
   constructor(config: FrameRenderConfig) {
     this.config = config;
@@ -477,6 +479,8 @@ export class FrameRenderer {
       
       const fit = region.fit ?? 'contain';
       const radiusPx = Math.max(0, (region.borderRadius ?? 0) * scaleFactor);
+      const chromaKey = region.chromaKey;
+      const chromaEnabled = Boolean(chromaKey?.enabled);
 
       
       ctx.save();
@@ -494,6 +498,54 @@ export class FrameRenderer {
       ctx.beginPath();
       addRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, radiusPx);
       ctx.clip();
+
+      const drawOverlaySource = (
+        srcX: number,
+        srcY: number,
+        srcW: number,
+        srcH: number,
+        destX: number,
+        destY: number,
+        destW: number,
+        destH: number
+      ) => {
+        if (!chromaEnabled) {
+          ctx.drawImage(video, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
+          return;
+        }
+
+        const canvasKey = region.id;
+        let chromaCanvas = this.overlayChromaCanvases.get(canvasKey);
+        if (!chromaCanvas) {
+          chromaCanvas = document.createElement('canvas');
+          this.overlayChromaCanvases.set(canvasKey, chromaCanvas);
+        }
+
+        const tempW = Math.max(1, Math.ceil(srcW));
+        const tempH = Math.max(1, Math.ceil(srcH));
+        if (chromaCanvas.width !== tempW || chromaCanvas.height !== tempH) {
+          chromaCanvas.width = tempW;
+          chromaCanvas.height = tempH;
+        }
+
+        const chromaCtx = chromaCanvas.getContext('2d', { willReadFrequently: true });
+        if (!chromaCtx) {
+          ctx.drawImage(video, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
+          return;
+        }
+
+        chromaCtx.clearRect(0, 0, tempW, tempH);
+        chromaCtx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, tempW, tempH);
+        const imageData = chromaCtx.getImageData(0, 0, tempW, tempH);
+        applyChromaKeyToImageData(
+          imageData.data,
+          parseHexColor(chromaKey?.color ?? '#00ff00'),
+          chromaKey?.threshold ?? 0.35,
+          chromaKey?.softness ?? 0.15
+        );
+        chromaCtx.putImageData(imageData, 0, 0);
+        ctx.drawImage(chromaCanvas, 0, 0, tempW, tempH, destX, destY, destW, destH);
+      };
 
       // Calculate aspect ratios
       const videoAspect = videoWidth / videoHeight;
@@ -536,7 +588,7 @@ export class FrameRenderer {
         srcH = Math.max(0, Math.min(videoHeight - srcY, srcH - epsilon * 2));
         
         // Step 3: Draw the cropped source to fill the destination box
-        ctx.drawImage(video, srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
+        drawOverlaySource(srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
       } else if (fit === 'cover') {
         // Object-fit: cover using source extraction (more precise than destination scaling)
         let srcX: number, srcY: number, srcW: number, srcH: number;
@@ -553,7 +605,7 @@ export class FrameRenderer {
           srcX = 0;
           srcY = (videoHeight - srcH) / 2;
         }
-        ctx.drawImage(video, srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
+        drawOverlaySource(srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
       } else {
         // Object-fit: contain - scale to fit within box, centered
         let containW: number, containH: number, containX: number, containY: number;
@@ -568,7 +620,7 @@ export class FrameRenderer {
           containX = boxX + (boxWidth - containW) / 2;
           containY = boxY;
         }
-        ctx.drawImage(video, 0, 0, videoWidth, videoHeight, containX, containY, containW, containH);
+        drawOverlaySource(0, 0, videoWidth, videoHeight, containX, containY, containW, containH);
       }
       ctx.restore();
     }
