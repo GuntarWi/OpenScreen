@@ -388,6 +388,7 @@ export class FrameRenderer {
   ): Promise<void> {
     const overlayRegions = this.config.overlayRegions || [];
     if (!overlayRegions.length) return;
+    const debugOverlay = typeof window !== 'undefined' && Boolean((window as any).__openscreen_debugOverlay);
 
     const previewWidth = this.config.previewWidth || canvasWidth;
     const previewHeight = this.config.previewHeight || canvasHeight;
@@ -395,8 +396,9 @@ export class FrameRenderer {
     const scaleY = canvasHeight / previewHeight;
     const scaleFactor = (scaleX + scaleY) / 2;
 
-    // Apply screenOffset to overlay positions since overlays are drawn on compositeCanvas
-    // In preview, overlays are inside a container with screenOffset CSS transform
+    // Apply screenOffset only when overlays are drawn directly on the composite canvas.
+    // When overlays are drawn on the screen canvas, the screenOffset is applied later
+    // to the whole screen, so keep this at zero.
     const offsetX = screenOffsetPx?.x ?? 0;
     const offsetY = screenOffsetPx?.y ?? 0;
 
@@ -449,26 +451,33 @@ export class FrameRenderer {
       const boxHeight = (region.size.height / 100) * previewHeight * scaleY;
       if (boxWidth <= 0 || boxHeight <= 0) continue;
 
-      // Overlay positions are percentages that represent the user's intended visual placement
-      // Add screenOffset since overlays move with the screen in preview
+      // Overlay positions are percentages that represent the user's intended visual placement.
+      // If an explicit screenOffset is provided, apply it to keep overlays aligned.
       const boxX = (region.position.x / 100) * previewWidth * scaleX + offsetX;
       const boxY = (region.position.y / 100) * previewHeight * scaleY + offsetY;
 
-      console.log('[Overlay Position Debug]', JSON.stringify({
-        regionPosition: region.position,
-        previewWidth,
-        previewHeight,
-        canvasWidth,
-        canvasHeight,
-        scaleX: scaleX.toFixed(4),
-        scaleY: scaleY.toFixed(4),
-        screenOffsetX: offsetX.toFixed(1),
-        screenOffsetY: offsetY.toFixed(1),
-        boxX: boxX.toFixed(1),
-        boxY: boxY.toFixed(1),
-        boxWidth: boxWidth.toFixed(1),
-        boxHeight: boxHeight.toFixed(1),
-      }));
+      if (debugOverlay) {
+        console.debug('[Overlay Debug][export]', JSON.stringify({
+          timeMs,
+          regionId: region.id,
+          regionPosition: region.position,
+          previewWidth,
+          previewHeight,
+          canvasWidth,
+          canvasHeight,
+          scaleX: scaleX.toFixed(4),
+          scaleY: scaleY.toFixed(4),
+          screenOffsetX: offsetX.toFixed(1),
+          screenOffsetY: offsetY.toFixed(1),
+          zoomScale: zoomScale.toFixed(4),
+          zoomFocusX: zoomFocusX.toFixed(4),
+          zoomFocusY: zoomFocusY.toFixed(4),
+          boxX: boxX.toFixed(1),
+          boxY: boxY.toFixed(1),
+          boxWidth: boxWidth.toFixed(1),
+          boxHeight: boxHeight.toFixed(1),
+        }));
+      }
 
       const videoWidth = video.videoWidth || asset.width || boxWidth;
       const videoHeight = video.videoHeight || asset.height || boxHeight;
@@ -487,11 +496,13 @@ export class FrameRenderer {
       
       // Apply zoom transform if active
       if (hasZoom) {
-        const originX = zoomFocusX * canvasWidth;
-        const originY = zoomFocusY * canvasHeight;
-        ctx.translate(originX, originY);
+        const focusX = zoomFocusX * canvasWidth;
+        const focusY = zoomFocusY * canvasHeight;
+        const centerX = canvasWidth / 2;
+        const centerY = canvasHeight / 2;
+        ctx.translate(centerX, centerY);
         ctx.scale(zoomScale, zoomScale);
-        ctx.translate(-originX, -originY);
+        ctx.translate(-focusX, -focusY);
       }
       
       // Always clip to the box for border radius and overflow
@@ -1206,8 +1217,10 @@ export class FrameRenderer {
     screenCtx.drawImage(videoCanvas, 0, 0, w, h);
     screenCtx.filter = 'none';
 
-    // Note: Overlays are drawn AFTER the screen is composited to avoid clipping
-    // at screenCanvas boundaries when screenOffset moves content near edges.
+    // Draw overlays on the screen canvas so they receive zoom and effect transforms.
+    if (this.config.overlayRegions && this.config.overlayRegions.length > 0) {
+      await this.drawOverlayVideos(screenCtx, timeMs, w, h, this.animationState);
+    }
 
     let finalScreen = this.screenCanvas;
     let finalScreenOffsetX = 0;
@@ -1240,13 +1253,6 @@ export class FrameRenderer {
       ctx.restore();
     } else {
       ctx.drawImage(finalScreen, drawX, drawY);
-    }
-
-    // Draw overlays on composite canvas (not screenCanvas) to avoid clipping
-    // Overlays are drawn after screen so they appear on top of the main video
-    // Pass screenOffset so overlays move with the screen like in preview
-    if (this.config.overlayRegions && this.config.overlayRegions.length > 0) {
-      await this.drawOverlayVideos(ctx, timeMs, w, h, this.animationState, { x: screenOffsetX, y: screenOffsetY });
     }
 
     // Draw foreground annotations on composite canvas

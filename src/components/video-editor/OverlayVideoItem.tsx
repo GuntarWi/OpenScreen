@@ -12,6 +12,7 @@ interface OverlayVideoItemProps {
   currentTimeMs: number;
   isPlaying: boolean;
   isSelected: boolean;
+  parentTransform: string; // Zoom transform applied to parent layer - used to force Rnd remount
   onSelect: (id: string) => void;
   onPositionChange: (id: string, position: { x: number; y: number }) => void;
   onSizeChange: (id: string, size: { width: number; height: number }) => void;
@@ -55,6 +56,7 @@ export function OverlayVideoItem({
   currentTimeMs,
   isPlaying,
   isSelected,
+  parentTransform,
   onSelect,
   onPositionChange,
   onSizeChange,
@@ -65,28 +67,45 @@ export function OverlayVideoItem({
   const lastSyncTimeRef = useRef<number>(0);
   const wasPlayingRef = useRef(false);
   const [isInteracting, setIsInteracting] = useState(false);
+  const [mountId, setMountId] = useState(0);
+  const wasVisibleRef = useRef(false);
 
   const x = (region.position.x / 100) * containerWidth;
   const y = (region.position.y / 100) * containerHeight;
   const width = (region.size.width / 100) * containerWidth;
   const height = (region.size.height / 100) * containerHeight;
 
-  // Debug: Log preview position (once per region)
-  useEffect(() => {
-    console.log('[Preview Position Debug]', JSON.stringify({
-      regionId: region.id,
-      regionPosition: region.position,
-      containerWidth,
-      containerHeight,
-      x: x.toFixed(1),
-      y: y.toFixed(1),
-      width: width.toFixed(1),
-      height: height.toFixed(1),
-    }));
-  }, [region.id, region.position, containerWidth, containerHeight, x, y, width, height]);
+  // Compute transform key early for both debug and Rnd key
+  const transformKey = parentTransform === 'none' || parentTransform === '' ? 'no-zoom' : 'zoomed';
+  
+  // Debug: Log position calculation on every render
+  if (typeof window !== 'undefined' && (window as any).__openscreen_debugOverlay !== false) {
+    console.log('[Overlay Debug][item-render]', {
+      id: region.id,
+      mountId,
+      transformKey,
+      posPercent: { x: region.position.x, y: region.position.y },
+      containerSize: { w: containerWidth, h: containerHeight },
+      calculatedPx: { x: Math.round(x), y: Math.round(y), w: Math.round(width), h: Math.round(height) },
+    });
+  }
 
   const isActive = currentTimeMs >= region.startMs && currentTimeMs <= region.endMs;
   const isVisible = isActive || isSelected;
+  
+  // Track visibility changes and force Rnd remount when becoming visible again
+  useEffect(() => {
+    if (isVisible && !wasVisibleRef.current) {
+      // Just became visible - increment mountId to force Rnd remount
+      setMountId(prev => {
+        if (typeof window !== 'undefined' && (window as any).__openscreen_debugOverlay !== false) {
+          console.log('[Overlay Debug][visibility-change]', { id: region.id, becameVisible: true, newMountId: prev + 1 });
+        }
+        return prev + 1;
+      });
+    }
+    wasVisibleRef.current = isVisible;
+  }, [isVisible, region.id]);
   const borderRadius = region.borderRadius ?? 0;
   const fit = region.fit ?? "contain";
   const chromaKey = region.chromaKey;
@@ -274,17 +293,23 @@ export function OverlayVideoItem({
   }
 
   const overlayOpacity = isActive || isSelected ? 1 : 0.35;
-  const getParentSize = (node?: HTMLElement | null) => {
-    const parent = node?.parentElement;
-    const width = parent?.clientWidth || containerWidth;
-    const height = parent?.clientHeight || containerHeight;
-    return { width, height };
+  // Always use containerWidth/Height props as the authoritative size
+  // This avoids issues when parent element has CSS transforms applied
+  const getParentSize = (_node?: HTMLElement | null) => {
+    return { width: containerWidth, height: containerHeight };
   };
 
+  // Force Rnd to re-mount when container dimensions change, visibility changes, or parent transform changes
+  // Including transformKey ensures Rnd remounts when zoom transform is applied/removed
+  const rndKey = `${region.id}-${containerWidth}-${containerHeight}-${mountId}-${transformKey}`;
+  
   return (
     <Rnd
+      key={rndKey}
       position={{ x, y }}
       size={{ width, height }}
+      data-overlay-id={region.id}
+      data-overlay-asset-id={region.assetId}
       onDragStart={() => {
         isDraggingRef.current = true;
         setIsInteracting(true);

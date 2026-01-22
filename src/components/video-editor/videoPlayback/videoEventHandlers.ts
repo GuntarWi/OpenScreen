@@ -11,6 +11,7 @@ interface VideoEventHandlersParams {
   onPlayStateChange: (playing: boolean) => void;
   onTimeUpdate: (time: number) => void;
   trimRegionsRef: React.MutableRefObject<TrimRegion[]>;
+  onSeekActivity?: () => void;
 }
 
 export function createVideoEventHandlers(params: VideoEventHandlersParams) {
@@ -24,6 +25,7 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
     onPlayStateChange,
     onTimeUpdate,
     trimRegionsRef,
+    onSeekActivity,
   } = params;
 
   const emitTime = (timeValue: number) => {
@@ -96,6 +98,7 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
 
   const handleSeeked = () => {
     isSeekingRef.current = false;
+    onSeekActivity?.();
 
     const currentTimeMs = video.currentTime * 1000;
     const activeTrimRegion = findActiveTrimRegion(currentTimeMs);
@@ -120,6 +123,7 @@ export function createVideoEventHandlers(params: VideoEventHandlersParams) {
 
   const handleSeeking = () => {
     isSeekingRef.current = true;
+    onSeekActivity?.();
 
     if (!isPlayingRef.current && !video.paused) {
       video.pause();

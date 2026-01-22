@@ -188,6 +188,7 @@ export function AnnotationOverlay({
     <Rnd
       position={{ x, y }}
       size={{ width, height }}
+      data-annotation-id={annotation.id}
       onDragStart={() => {
         isDraggingRef.current = true;
       }}

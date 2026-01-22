@@ -195,10 +195,40 @@ function VideoPlayback(
   const trimRegionsRef = useRef<TrimRegion[]>([]);
   const motionBlurEnabledRef = useRef(motionBlurEnabled);
   const videoReadyRafRef = useRef<number | null>(null);
+  const lastTickTimeMsRef = useRef<number | null>(null);
+  const seekSnapUntilRef = useRef(0);
+  const overlayDebugStateRef = useRef<Map<string, boolean>>(new Map());
+  const overlayDebugLastTransformRef = useRef<string | null>(null);
 
   const CURSOR_TRAIL_MS = 500;
   const CURSOR_CLICK_MS = 280;
   const RAD_TO_DEG = 180 / Math.PI;
+
+  // DEBUG: Temporarily enabled by default for overlay position debugging
+  // Set window.__openscreen_debugOverlay = false to disable
+  const isOverlayDebugEnabled = () => {
+    if (typeof window === 'undefined') return false;
+    const raw = (window as any).__openscreen_debugOverlay;
+    // Default to enabled (true) unless explicitly set to false
+    return raw !== false && raw !== 'off' && raw !== 0;
+  };
+
+  const getOverlayDebugMode = useCallback(() => {
+    if (typeof window === 'undefined') return 'off';
+    const raw = (window as any).__openscreen_debugOverlay;
+    if (raw === false || raw === 'off' || raw === 0) return 'off';
+    if (raw === 'verbose' || raw === 'full' || raw === 'trace') return 'verbose';
+    // Default to 'basic' (enabled) for debugging
+    return 'basic';
+  }, []);
+
+  const logOverlayDebug = useCallback((kind: string, payload: Record<string, unknown>, verboseOnly = false) => {
+    const mode = getOverlayDebugMode();
+    if (mode === 'off') return;
+    if (verboseOnly && mode !== 'verbose') return;
+    // Always use console.log so logs are visible (console.debug is often filtered)
+    console.log('[Overlay Debug][preview]', { kind, ...payload });
+  }, [getOverlayDebugMode]);
 
   const cancelExtendedPlayback = useCallback(() => {
     extendedPlaybackRef.current = false;
@@ -293,35 +323,57 @@ function VideoPlayback(
   const applyZoomToOverlays = useCallback((zoomScale: number, focusX: number, focusY: number) => {
     const overlayLayer = overlayVideoLayerRef.current;
     const annotationLayer = overlayRef.current;
-    
+
+    const resetTransform = (layer: HTMLDivElement | null) => {
+      if (!layer) return;
+      layer.style.transform = '';
+      layer.style.transformOrigin = '';
+    };
+
     if (zoomScale === 1 && focusX === 0.5 && focusY === 0.5) {
       // No zoom - reset transform
-      if (overlayLayer) {
-        overlayLayer.style.transform = '';
-        overlayLayer.style.transformOrigin = '';
-      }
-      if (annotationLayer) {
-        annotationLayer.style.transform = '';
-        annotationLayer.style.transformOrigin = '';
+      resetTransform(overlayLayer);
+      resetTransform(annotationLayer);
+      if (isOverlayDebugEnabled() && overlayDebugLastTransformRef.current !== 'none') {
+        overlayDebugLastTransformRef.current = 'none';
+        logOverlayDebug('zoom-reset', { zoomScale, focusX, focusY });
       }
       return;
     }
 
-    // Apply zoom transform centered on focus point
-    const originX = focusX * 100;
-    const originY = focusY * 100;
-    const transform = `scale(${zoomScale})`;
-    const transformOrigin = `${originX}% ${originY}%`;
+    const applyLayerTransform = (layer: HTMLDivElement | null) => {
+      if (!layer) return;
 
-    if (overlayLayer) {
-      overlayLayer.style.transform = transform;
-      overlayLayer.style.transformOrigin = transformOrigin;
-    }
-    if (annotationLayer) {
-      annotationLayer.style.transform = transform;
-      annotationLayer.style.transformOrigin = transformOrigin;
-    }
-  }, []);
+      const stageSize = stageSizeRef.current;
+      const width = layer.clientWidth || stageSize.width;
+      const height = layer.clientHeight || stageSize.height;
+      if (!width || !height) return;
+
+      const focusStagePxX = focusX * width;
+      const focusStagePxY = focusY * height;
+      const stageCenterX = width / 2;
+      const stageCenterY = height / 2;
+
+      // Match the Pixi camera transform: translate to center, scale, translate focus to origin.
+      const transform = `translate(${stageCenterX}px, ${stageCenterY}px) scale(${zoomScale}) translate(${-focusStagePxX}px, ${-focusStagePxY}px)`;
+      layer.style.transformOrigin = '0 0';
+      layer.style.transform = transform;
+
+      if (isOverlayDebugEnabled() && overlayDebugLastTransformRef.current !== transform) {
+        overlayDebugLastTransformRef.current = transform;
+        logOverlayDebug('zoom-transform', {
+          zoomScale,
+          focusX,
+          focusY,
+          stageWidth: width,
+          stageHeight: height,
+        });
+      }
+    };
+
+    applyLayerTransform(overlayLayer);
+    applyLayerTransform(annotationLayer);
+  }, [logOverlayDebug]);
 
   // Load default cursor SVG image
   useEffect(() => {
@@ -1449,6 +1501,9 @@ function VideoPlayback(
       onPlayStateChange,
       onTimeUpdate,
       trimRegionsRef,
+      onSeekActivity: () => {
+        seekSnapUntilRef.current = performance.now() + 200;
+      },
     });
 
     const handlePause = () => {
@@ -1546,9 +1601,19 @@ function VideoPlayback(
       });
     };
 
+    let tickerLogThrottle = 0;
+    const TICKER_LOG_INTERVAL_MS = 50;
+
     const ticker = () => {
-      const { region, strength } = findDominantRegion(zoomRegionsRef.current, currentTimeRef.current);
-      const effectState = computeEffectState(effectRegionsRef.current, currentTimeRef.current);
+      const timeMs = currentTimeRef.current;
+      const lastTimeMs = lastTickTimeMsRef.current;
+      const hasTimeJump = lastTimeMs !== null && Math.abs(timeMs - lastTimeMs) > 200;
+      const nowPerf = performance.now();
+      const isScrubbing = nowPerf < seekSnapUntilRef.current;
+      const shouldLogTicker = nowPerf - tickerLogThrottle > TICKER_LOG_INTERVAL_MS;
+
+      const { region, strength } = findDominantRegion(zoomRegionsRef.current, timeMs);
+      const effectState = computeEffectState(effectRegionsRef.current, timeMs);
       effectStateRef.current = effectState;
       
       const defaultFocus = DEFAULT_FOCUS;
@@ -1724,6 +1789,68 @@ function VideoPlayback(
 
       const state = animationStateRef.current;
 
+      const shouldSnap = isSeekingRef.current || !isPlayingRef.current || hasTimeJump || isScrubbing;
+
+      // Debug logging for ticker state - only log once per timeMs when there's actual change
+      const hasZoomChange = Math.abs(targetScaleFactor - state.scale) > 0.001 ||
+                           Math.abs(targetFocus.cx - state.focusX) > 0.001 ||
+                           Math.abs(targetFocus.cy - state.focusY) > 0.001;
+      const roundedTimeMs = Math.round(timeMs);
+      const lastTickerLogTime = (window as any).__lastTickerLogTime ?? -1;
+      const isNewTime = roundedTimeMs !== lastTickerLogTime;
+      if (shouldLogTicker && isOverlayDebugEnabled() && isNewTime && (hasZoomChange || hasTimeJump)) {
+        tickerLogThrottle = nowPerf;
+        (window as any).__lastTickerLogTime = roundedTimeMs;
+        
+        // Get overlay layer and positions
+        const overlayLayer = overlayVideoLayerRef.current;
+        const stageW = overlayLayer?.clientWidth || 0;
+        const stageH = overlayLayer?.clientHeight || 0;
+        const overlayEls = overlayLayer?.querySelectorAll('[data-overlay-id]') || [];
+        const overlayPositions: Record<string, { cssLeft: number; cssTop: number; domLeft: number; domTop: number }> = {};
+        overlayEls.forEach((el) => {
+          const id = el.getAttribute('data-overlay-id');
+          if (id) {
+            const htmlEl = el as HTMLElement;
+            const rect = el.getBoundingClientRect();
+            const parentRect = overlayLayer?.getBoundingClientRect();
+            overlayPositions[id] = {
+              cssLeft: parseFloat(htmlEl.style.left) || 0,
+              cssTop: parseFloat(htmlEl.style.top) || 0,
+              domLeft: Number((rect.left - (parentRect?.left || 0)).toFixed(1)),
+              domTop: Number((rect.top - (parentRect?.top || 0)).toFixed(1)),
+            };
+          }
+        });
+        
+        console.log('[Overlay Debug][ticker]', {
+          timeMs: roundedTimeMs,
+          hasTimeJump,
+          hasZoomChange,
+          zoomRegion: region ? { id: region.id, depth: region.depth, focus: region.focus } : null,
+          strength: Number(strength.toFixed(3)),
+          target: { scale: Number(targetScaleFactor.toFixed(4)), focusX: Number(targetFocus.cx.toFixed(4)), focusY: Number(targetFocus.cy.toFixed(4)) },
+          current: { scale: Number(state.scale.toFixed(4)), focusX: Number(state.focusX.toFixed(4)), focusY: Number(state.focusY.toFixed(4)) },
+          overlayTransform: overlayLayer?.style.transform || 'none',
+          stage: { w: stageW, h: stageH },
+          overlays: overlayPositions,
+        });
+      }
+
+      if (shouldSnap) {
+        if (hasTimeJump || isScrubbing) {
+          followAnchorRef.current = null;
+        }
+        state.scale = targetScaleFactor;
+        state.focusX = targetFocus.cx;
+        state.focusY = targetFocus.cy;
+        applyTransform(0);
+        applyEffectTransform(effectState);
+        applyZoomToOverlays(state.scale, state.focusX, state.focusY);
+        lastTickTimeMsRef.current = timeMs;
+        return;
+      }
+
       const prevScale = state.scale;
       const prevFocusX = state.focusX;
       const prevFocusY = state.focusY;
@@ -1767,6 +1894,7 @@ function VideoPlayback(
       applyTransform(motionIntensity);
       applyEffectTransform(effectState);
       applyZoomToOverlays(state.scale, state.focusX, state.focusY);
+      lastTickTimeMsRef.current = timeMs;
     };
 
     app.ticker.add(ticker);
@@ -1875,6 +2003,124 @@ function VideoPlayback(
   useEffect(() => {
     overlayEndMsRef.current = overlayRegions.reduce((max, region) => Math.max(max, region.endMs), 0);
   }, [overlayRegions]);
+
+  // Debug: Log overlay region enter/exit events
+  useEffect(() => {
+    if (!isOverlayDebugEnabled()) return;
+    const next = new Map<string, boolean>();
+    for (const region of overlayRegions) {
+      const active = timeMs >= region.startMs && timeMs <= region.endMs;
+      next.set(region.id, active);
+      const prev = overlayDebugStateRef.current.get(region.id) ?? false;
+      if (prev !== active) {
+        logOverlayDebug(active ? 'region-enter' : 'region-exit', {
+          regionId: region.id,
+          timeMs,
+          startMs: region.startMs,
+          endMs: region.endMs,
+          zoomScale: animationStateRef.current.scale,
+          focusX: animationStateRef.current.focusX,
+          focusY: animationStateRef.current.focusY,
+        });
+      }
+    }
+    overlayDebugStateRef.current = next;
+  }, [logOverlayDebug, overlayRegions, timeMs]);
+
+  // Debug: Log only when timeline position changes significantly
+  const lastDebugTimeMsRef = useRef<number | null>(null);
+  useEffect(() => {
+    const debugMode = getOverlayDebugMode();
+    if (debugMode === 'off') return;
+    
+    // Only log when timeMs changes by at least 1ms
+    const lastTime = lastDebugTimeMsRef.current;
+    if (lastTime !== null && Math.abs(timeMs - lastTime) < 1) return;
+    lastDebugTimeMsRef.current = timeMs;
+
+    const overlayLayer = overlayVideoLayerRef.current;
+    const stageWidth = overlayLayer?.clientWidth || 0;
+    const stageHeight = overlayLayer?.clientHeight || 0;
+
+    // Get actual DOM positions of overlay elements with detailed transform info
+    const overlayElements = overlayLayer?.querySelectorAll('[data-overlay-id]') || [];
+    const domPositions: Record<string, { 
+      relLeft: number; relTop: number; width: number; height: number;
+      transform: string; computedTransform: string;
+      layerRect: { left: number; top: number };
+      elRect: { left: number; top: number };
+    }> = {};
+    const layerRect = overlayLayer?.getBoundingClientRect();
+    overlayElements.forEach((el) => {
+      const id = el.getAttribute('data-overlay-id');
+      if (id) {
+        const htmlEl = el as HTMLElement;
+        const rect = el.getBoundingClientRect();
+        const computedStyle = window.getComputedStyle(htmlEl);
+        domPositions[id] = {
+          relLeft: Number((rect.left - (layerRect?.left || 0)).toFixed(1)),
+          relTop: Number((rect.top - (layerRect?.top || 0)).toFixed(1)),
+          width: Number(rect.width.toFixed(1)),
+          height: Number(rect.height.toFixed(1)),
+          transform: htmlEl.style.transform || 'none',
+          computedTransform: computedStyle.transform || 'none',
+          layerRect: { left: Number((layerRect?.left || 0).toFixed(1)), top: Number((layerRect?.top || 0).toFixed(1)) },
+          elRect: { left: Number(rect.left.toFixed(1)), top: Number(rect.top.toFixed(1)) },
+        };
+      }
+    });
+
+    const activeOverlays = overlayRegions
+      .filter((region) => timeMs >= region.startMs && timeMs <= region.endMs)
+      .map((region) => {
+        const expectedX = (region.position.x / 100) * stageWidth;
+        const expectedY = (region.position.y / 100) * stageHeight;
+        const dom = domPositions[region.id];
+        const deltaX = dom ? Number((dom.relLeft - expectedX).toFixed(1)) : null;
+        const deltaY = dom ? Number((dom.relTop - expectedY).toFixed(1)) : null;
+        return {
+          id: region.id,
+          expectedPx: { x: Number(expectedX.toFixed(1)), y: Number(expectedY.toFixed(1)) },
+          dom: dom ? {
+            relPos: { x: dom.relLeft, y: dom.relTop },
+            delta: { x: deltaX, y: deltaY },
+            transform: dom.computedTransform,
+            layerRect: dom.layerRect,
+            elRect: dom.elRect,
+          } : null,
+          timing: { start: region.startMs, end: region.endMs },
+        };
+      });
+
+    const { region: dominantZoom, strength } = findDominantRegion(zoomRegions, timeMs);
+    const effectState = effectStateRef.current;
+
+    console.log('[Overlay Debug][scrub]', {
+      timeMs,
+      stage: { width: stageWidth, height: stageHeight },
+      zoom: {
+        scale: Number(animationStateRef.current.scale.toFixed(4)),
+        focusX: Number(animationStateRef.current.focusX.toFixed(4)),
+        focusY: Number(animationStateRef.current.focusY.toFixed(4)),
+      },
+      dominantZoom: dominantZoom
+        ? { id: dominantZoom.id, strength: Number(strength.toFixed(3)), depth: dominantZoom.depth, focus: dominantZoom.focus }
+        : null,
+      effect: effectState ? {
+        skewX: Number((effectState.skewX || 0).toFixed(3)),
+        skewY: Number((effectState.skewY || 0).toFixed(3)),
+        tiltXDeg: Number((effectState.tiltXDeg || 0).toFixed(3)),
+        tiltYDeg: Number((effectState.tiltYDeg || 0).toFixed(3)),
+        roll: Number((effectState.roll || 0).toFixed(3)),
+        scale: Number((effectState.scale || 1).toFixed(3)),
+        offsetX: Number((effectState.offsetX || 0).toFixed(1)),
+        offsetY: Number((effectState.offsetY || 0).toFixed(1)),
+      } : null,
+      overlayTransform: overlayLayer?.style.transform || 'none',
+      activeOverlays,
+    });
+  }, [getOverlayDebugMode, overlayRegions, timeMs, zoomRegions]);
+
   const getActiveAnnotations = (layer?: 'foreground' | 'midground') => {
     const filtered = (annotationRegions || []).filter((annotation) => {
       if (typeof annotation.startMs !== 'number' || typeof annotation.endMs !== 'number') return false;
@@ -1993,8 +2239,31 @@ function VideoPlayback(
             >
               {(() => {
                 if (!activeOverlayRegions.length) return null;
-                const containerWidth = overlayVideoLayerRef.current?.clientWidth || overlayRef.current?.clientWidth || 800;
-                const containerHeight = overlayVideoLayerRef.current?.clientHeight || overlayRef.current?.clientHeight || 600;
+                // Use stageSizeRef as the authoritative source for dimensions
+                // This avoids issues when DOM elements have transforms or are in transitional states
+                const stageSize = stageSizeRef.current;
+                const containerWidth = stageSize.width || overlayVideoLayerRef.current?.clientWidth || 800;
+                const containerHeight = stageSize.height || overlayVideoLayerRef.current?.clientHeight || 600;
+                
+                // Debug: Log containerWidth and parent transforms when rendering overlays
+                if (isOverlayDebugEnabled()) {
+                  const layerEl = overlayVideoLayerRef.current;
+                  const screenGroup = screenGroupRef.current;
+                  console.log('[Overlay Debug][render]', {
+                    containerWidth,
+                    containerHeight,
+                    stageSizeWidth: stageSize.width,
+                    stageSizeHeight: stageSize.height,
+                    layerClientWidth: layerEl?.clientWidth,
+                    layerTransform: layerEl?.style.transform || 'none',
+                    screenGroupTransform: screenGroup?.style.transform || 'none',
+                    screenGroupRect: screenGroup?.getBoundingClientRect(),
+                  });
+                }
+                
+                // Get current overlay layer transform to pass to children
+                const parentTransform = overlayVideoLayerRef.current?.style.transform || 'none';
+                
                 return activeOverlayRegions.map((region) => {
                   const asset = overlayAssetMap.get(region.assetId);
                   if (!asset) return null;
@@ -2008,6 +2277,7 @@ function VideoPlayback(
                       currentTimeMs={timeMs}
                       isPlaying={isPlaying}
                       isSelected={region.id === selectedOverlayId}
+                      parentTransform={parentTransform}
                       onSelect={(id) => onSelectOverlay?.(id)}
                       onPositionChange={(id, position) => onOverlayPositionChange?.(id, position)}
                       onSizeChange={(id, size) => onOverlaySizeChange?.(id, size)}
