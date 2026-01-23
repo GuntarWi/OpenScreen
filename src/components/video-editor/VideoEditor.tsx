@@ -1243,6 +1243,30 @@ export default function VideoEditor() {
     );
   }, []);
 
+  const handleOverlayOrderChange = useCallback((orderedIds: string[]) => {
+    setOverlayRegions((prev) => {
+      const byId = new Map(prev.map((region) => [region.id, region]));
+      const maxZ = orderedIds.length;
+      const updated: OverlayVideoRegion[] = [];
+
+      orderedIds.forEach((id, index) => {
+        const region = byId.get(id);
+        if (!region) return;
+        updated.push({ ...region, zIndex: maxZ - index });
+        byId.delete(id);
+      });
+
+      byId.forEach((region) => {
+        updated.push(region);
+      });
+
+      const nextZ = updated.reduce((max, region) => Math.max(max, region.zIndex), 0) + 1;
+      nextOverlayZIndexRef.current = Math.max(nextOverlayZIndexRef.current, nextZ);
+
+      return updated;
+    });
+  }, []);
+
   const handleSelectCursor = useCallback((id: string | null) => {
     setSelectedCursorId(id);
     if (id) {
@@ -1852,6 +1876,7 @@ export default function VideoEditor() {
           onOverlayAssetRemove={handleRemoveOverlayAsset}
           onOverlayAddToTimeline={handleAddOverlayRegion}
           onOverlayRegionChange={handleOverlayRegionChange}
+          onOverlayOrderChange={handleOverlayOrderChange}
           cropRegion={cropRegion}
           onCropChange={setCropRegion}
           aspectRatio={aspectRatio}

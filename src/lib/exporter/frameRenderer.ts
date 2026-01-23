@@ -9,6 +9,7 @@ import { clampFocusToStage as clampFocusToStageUtil } from '@/components/video-e
 import { renderAnnotations } from './annotationRenderer';
 import { applyChromaKeyToImageData, parseHexColor } from '@/utils/chromaKey';
 import { computeEffectState, type CombinedEffectState } from '@/components/video-editor/videoPlayback/effectUtils';
+import { computeOverlayLayout } from '@/utils/overlayLayout';
 
 const EFFECT_PERSPECTIVE = 1200;
 const SKEW_TO_TILT_RATIO = 0.55;
@@ -446,15 +447,30 @@ export class FrameRenderer {
       const video = await this.seekOverlayVideo(asset, localMs);
       if (!video || video.readyState < 2) continue;
 
-      // Calculate box dimensions - positions are percentages of preview, scale to export
-      const boxWidth = (region.size.width / 100) * previewWidth * scaleX;
-      const boxHeight = (region.size.height / 100) * previewHeight * scaleY;
-      if (boxWidth <= 0 || boxHeight <= 0) continue;
+      const videoWidth = video.videoWidth || asset.width || 1;
+      const videoHeight = video.videoHeight || asset.height || 1;
 
-      // Overlay positions are percentages that represent the user's intended visual placement.
-      // If an explicit screenOffset is provided, apply it to keep overlays aligned.
-      const boxX = (region.position.x / 100) * previewWidth * scaleX + offsetX;
-      const boxY = (region.position.y / 100) * previewHeight * scaleY + offsetY;
+      const layout = computeOverlayLayout({
+        region,
+        containerWidth: previewWidth,
+        containerHeight: previewHeight,
+        videoWidth,
+        videoHeight,
+      });
+
+      if (!layout) continue;
+
+      const boxX = layout.box.x * scaleX + offsetX;
+      const boxY = layout.box.y * scaleY + offsetY;
+      const boxWidth = layout.box.width * scaleX;
+      const boxHeight = layout.box.height * scaleY;
+
+      const destX = layout.dest.x * scaleX + offsetX;
+      const destY = layout.dest.y * scaleY + offsetY;
+      const destW = layout.dest.width * scaleX;
+      const destH = layout.dest.height * scaleY;
+
+      if (boxWidth <= 0 || boxHeight <= 0) continue;
 
       if (debugOverlay) {
         console.debug('[Overlay Debug][export]', JSON.stringify({
@@ -479,21 +495,12 @@ export class FrameRenderer {
         }));
       }
 
-      const videoWidth = video.videoWidth || asset.width || boxWidth;
-      const videoHeight = video.videoHeight || asset.height || boxHeight;
-
-      // Apply crop if specified
-      const crop = region.crop;
-      const hasCrop = crop && (crop.x !== 0 || crop.y !== 0 || crop.width !== 100 || crop.height !== 100);
-      
-      const fit = region.fit ?? 'contain';
       const radiusPx = Math.max(0, (region.borderRadius ?? 0) * scaleFactor);
       const chromaKey = region.chromaKey;
       const chromaEnabled = Boolean(chromaKey?.enabled);
 
-      
       ctx.save();
-      
+
       // Apply zoom transform if active
       if (hasZoom) {
         const focusX = zoomFocusX * canvasWidth;
@@ -504,7 +511,7 @@ export class FrameRenderer {
         ctx.scale(zoomScale, zoomScale);
         ctx.translate(-focusX, -focusY);
       }
-      
+
       // Always clip to the box for border radius and overflow
       ctx.beginPath();
       addRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, radiusPx);
@@ -515,13 +522,13 @@ export class FrameRenderer {
         srcY: number,
         srcW: number,
         srcH: number,
-        destX: number,
-        destY: number,
-        destW: number,
-        destH: number
+        drawX: number,
+        drawY: number,
+        drawW: number,
+        drawH: number
       ) => {
         if (!chromaEnabled) {
-          ctx.drawImage(video, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
+          ctx.drawImage(video, srcX, srcY, srcW, srcH, drawX, drawY, drawW, drawH);
           return;
         }
 
@@ -541,7 +548,7 @@ export class FrameRenderer {
 
         const chromaCtx = chromaCanvas.getContext('2d', { willReadFrequently: true });
         if (!chromaCtx) {
-          ctx.drawImage(video, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
+          ctx.drawImage(video, srcX, srcY, srcW, srcH, drawX, drawY, drawW, drawH);
           return;
         }
 
@@ -555,84 +562,19 @@ export class FrameRenderer {
           chromaKey?.softness ?? 0.15
         );
         chromaCtx.putImageData(imageData, 0, 0);
-        ctx.drawImage(chromaCanvas, 0, 0, tempW, tempH, destX, destY, destW, destH);
+        ctx.drawImage(chromaCanvas, 0, 0, tempW, tempH, drawX, drawY, drawW, drawH);
       };
 
-      // Calculate aspect ratios
-      const videoAspect = videoWidth / videoHeight;
-      const boxAspect = boxWidth / boxHeight;
-
-      if (hasCrop && crop) {
-        // Use source rectangle extraction to match CSS object-fit:cover + crop transform
-        // Step 1: Calculate what portion of video is visible with object-fit: cover
-        let visibleX: number, visibleY: number, visibleW: number, visibleH: number;
-        if (videoAspect > boxAspect) {
-          // Video is wider than box - full height visible, width cropped from center
-          visibleH = videoHeight;
-          visibleW = videoHeight * boxAspect;
-          visibleX = (videoWidth - visibleW) / 2;
-          visibleY = 0;
-        } else {
-          // Video is taller than box - full width visible, height cropped from center
-          visibleW = videoWidth;
-          visibleH = videoWidth / boxAspect;
-          visibleX = 0;
-          visibleY = (videoHeight - visibleH) / 2;
-        }
-        
-        // Step 2: Apply crop percentages to the visible region
-        // CSS transform: scale(100/width, 100/height) translate(-x*scaleX%, -y*scaleY%)
-        // Crop offsets are relative to the full visible region (0-100%).
-        const cropWidth = Math.max(0.0001, crop.width);
-        const cropHeight = Math.max(0.0001, crop.height);
-        let srcX = visibleX + (crop.x / cropWidth) * visibleW;
-        let srcY = visibleY + (crop.y / cropHeight) * visibleH;
-        let srcW = (crop.width / 100) * visibleW;
-        let srcH = (crop.height / 100) * visibleH;
-        
-        // Apply a tiny epsilon shrink to avoid sampling outside the video edge.
-        // Keep math aligned to preview (no rounding) to prevent position/crop drift.
-        const epsilon = 0.01;
-        srcX = Math.max(0, srcX + epsilon);
-        srcY = Math.max(0, srcY + epsilon);
-        srcW = Math.max(0, Math.min(videoWidth - srcX, srcW - epsilon * 2));
-        srcH = Math.max(0, Math.min(videoHeight - srcY, srcH - epsilon * 2));
-        
-        // Step 3: Draw the cropped source to fill the destination box
-        drawOverlaySource(srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
-      } else if (fit === 'cover') {
-        // Object-fit: cover using source extraction (more precise than destination scaling)
-        let srcX: number, srcY: number, srcW: number, srcH: number;
-        if (videoAspect > boxAspect) {
-          // Video wider - crop sides
-          srcH = videoHeight;
-          srcW = videoHeight * boxAspect;
-          srcX = (videoWidth - srcW) / 2;
-          srcY = 0;
-        } else {
-          // Video taller - crop top/bottom
-          srcW = videoWidth;
-          srcH = videoWidth / boxAspect;
-          srcX = 0;
-          srcY = (videoHeight - srcH) / 2;
-        }
-        drawOverlaySource(srcX, srcY, srcW, srcH, boxX, boxY, boxWidth, boxHeight);
-      } else {
-        // Object-fit: contain - scale to fit within box, centered
-        let containW: number, containH: number, containX: number, containY: number;
-        if (videoAspect > boxAspect) {
-          containW = boxWidth;
-          containH = boxWidth / videoAspect;
-          containX = boxX;
-          containY = boxY + (boxHeight - containH) / 2;
-        } else {
-          containH = boxHeight;
-          containW = boxHeight * videoAspect;
-          containX = boxX + (boxWidth - containW) / 2;
-          containY = boxY;
-        }
-        drawOverlaySource(0, 0, videoWidth, videoHeight, containX, containY, containW, containH);
-      }
+      drawOverlaySource(
+        layout.src.x,
+        layout.src.y,
+        layout.src.width,
+        layout.src.height,
+        destX,
+        destY,
+        destW,
+        destH
+      );
       ctx.restore();
     }
   }

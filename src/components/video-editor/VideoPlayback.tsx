@@ -35,6 +35,7 @@ import { updateOverlayIndicator } from "./videoPlayback/overlayUtils";
 import { layoutVideoContent as layoutVideoContentUtil } from "./videoPlayback/layoutUtils";
 import { applyZoomTransform } from "./videoPlayback/zoomTransform";
 import { createVideoEventHandlers } from "./videoPlayback/videoEventHandlers";
+import { OverlayPixiRenderer } from "./videoPlayback/overlayPixiRenderer";
 import { type AspectRatio, formatAspectRatioForCSS } from "@/utils/aspectRatioUtils";
 import { AnnotationContentView, AnnotationOverlay } from "./AnnotationOverlay";
 import { OverlayVideoItem } from "./OverlayVideoItem";
@@ -168,6 +169,10 @@ function VideoPlayback(
   const currentTimeRef = useRef(0);
   const overlayEndMsRef = useRef(0);
   const videoDurationMsRef = useRef(0);
+  const overlayRendererRef = useRef<OverlayPixiRenderer | null>(null);
+  const overlayRegionsRef = useRef<OverlayVideoRegion[]>([]);
+  const overlayAssetsRef = useRef<OverlayVideoAsset[]>([]);
+  const selectedOverlayIdRef = useRef<string | null>(null);
   const extendedPlaybackRef = useRef(false);
   const extendedPlaybackRafRef = useRef<number | null>(null);
   const extendedPlaybackStartRef = useRef(0);
@@ -222,13 +227,57 @@ function VideoPlayback(
     return 'basic';
   }, []);
 
+  const formatOverlayDebugPayload = useCallback((payload: Record<string, unknown>) => {
+    try {
+      const seen = new WeakSet<object>();
+      return JSON.stringify(payload, (_key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            return '[Circular]';
+          }
+          seen.add(value);
+        }
+
+        if (typeof DOMRect !== 'undefined' && value instanceof DOMRect) {
+          return {
+            x: value.x,
+            y: value.y,
+            width: value.width,
+            height: value.height,
+            top: value.top,
+            right: value.right,
+            bottom: value.bottom,
+            left: value.left,
+          };
+        }
+
+        if (value instanceof Map) {
+          return Object.fromEntries(value);
+        }
+
+        if (value instanceof Set) {
+          return Array.from(value);
+        }
+
+        return value;
+      }, 2);
+    } catch (error) {
+      return `[Unserializable payload: ${String(error)}]`;
+    }
+  }, []);
+
+  const logOverlayDebugExpanded = useCallback((label: string, payload: Record<string, unknown>) => {
+    const formatted = formatOverlayDebugPayload(payload);
+    console.log(`${label}\n${formatted}`);
+  }, [formatOverlayDebugPayload]);
+
   const logOverlayDebug = useCallback((kind: string, payload: Record<string, unknown>, verboseOnly = false) => {
     const mode = getOverlayDebugMode();
     if (mode === 'off') return;
     if (verboseOnly && mode !== 'verbose') return;
     // Always use console.log so logs are visible (console.debug is often filtered)
-    console.log('[Overlay Debug][preview]', { kind, ...payload });
-  }, [getOverlayDebugMode]);
+    logOverlayDebugExpanded('[Overlay Debug][preview]', { kind, ...payload });
+  }, [getOverlayDebugMode, logOverlayDebugExpanded]);
 
   const cancelExtendedPlayback = useCallback(() => {
     extendedPlaybackRef.current = false;
@@ -355,9 +404,11 @@ function VideoPlayback(
       const stageCenterY = height / 2;
 
       // Match the Pixi camera transform: translate to center, scale, translate focus to origin.
-      const transform = `translate(${stageCenterX}px, ${stageCenterY}px) scale(${zoomScale}) translate(${-focusStagePxX}px, ${-focusStagePxY}px)`;
+      const transform = `translate3d(${stageCenterX}px, ${stageCenterY}px, 0) scale3d(${zoomScale}, ${zoomScale}, 1) translate3d(${-focusStagePxX}px, ${-focusStagePxY}px, 0)`;
       layer.style.transformOrigin = '0 0';
       layer.style.transform = transform;
+      layer.style.transformStyle = 'preserve-3d';
+      layer.style.backfaceVisibility = 'hidden';
 
       if (isOverlayDebugEnabled() && overlayDebugLastTransformRef.current !== transform) {
         overlayDebugLastTransformRef.current = transform;
@@ -630,6 +681,12 @@ function VideoPlayback(
         : null;
 
       updateOverlayForRegion(activeRegion);
+
+      const overlayRenderer = overlayRendererRef.current;
+      if (overlayRenderer) {
+        overlayRenderer.setStageSize(result.stageSize);
+        overlayRenderer.syncRegions(overlayRegionsRef.current);
+      }
     }
   }, [updateOverlayForRegion, cropRegion, borderRadius, padding]);
 
@@ -757,6 +814,27 @@ function VideoPlayback(
   useEffect(() => {
     selectedEffectIdRef.current = selectedEffectId || null;
   }, [selectedEffectId]);
+
+  useEffect(() => {
+    overlayRegionsRef.current = overlayRegions;
+  }, [overlayRegions]);
+
+  useEffect(() => {
+    overlayAssetsRef.current = overlayAssets;
+  }, [overlayAssets]);
+
+  useEffect(() => {
+    selectedOverlayIdRef.current = selectedOverlayId ?? null;
+  }, [selectedOverlayId]);
+
+  useEffect(() => {
+    if (!pixiReady || !videoReady) return;
+    const renderer = overlayRendererRef.current;
+    if (!renderer) return;
+    renderer.setAssets(overlayAssets);
+    renderer.syncRegions(overlayRegions);
+    renderer.setStageSize(stageSizeRef.current);
+  }, [pixiReady, videoReady, overlayAssets, overlayRegions]);
 
   // Follow anchor ref and keep props in refs for synchronous access in ticker
   const followAnchorRef = useRef<ZoomFocus | null>(null);
@@ -1402,13 +1480,22 @@ function VideoPlayback(
 
       // Camera container - this will be scaled/positioned for zoom
       const cameraContainer = new Container();
+      cameraContainer.sortableChildren = true;
       cameraContainerRef.current = cameraContainer;
       app.stage.addChild(cameraContainer);
 
       // Video container - holds the masked video sprite
       const videoContainer = new Container();
+      videoContainer.zIndex = 0;
       videoContainerRef.current = videoContainer;
       cameraContainer.addChild(videoContainer);
+
+      const overlayRenderer = new OverlayPixiRenderer(cameraContainer);
+      overlayRenderer.setZIndex(1);
+      overlayRenderer.setAssets(overlayAssetsRef.current);
+      overlayRenderer.syncRegions(overlayRegionsRef.current);
+      overlayRenderer.setStageSize(stageSizeRef.current);
+      overlayRendererRef.current = overlayRenderer;
       
       setPixiReady(true);
     })();
@@ -1416,6 +1503,10 @@ function VideoPlayback(
     return () => {
       mounted = false;
       setPixiReady(false);
+      if (overlayRendererRef.current) {
+        overlayRendererRef.current.destroy();
+        overlayRendererRef.current = null;
+      }
       if (app && app.renderer) {
         app.destroy(true, { children: true, texture: true, textureSource: true });
       }
@@ -1606,6 +1697,7 @@ function VideoPlayback(
 
     const ticker = () => {
       const timeMs = currentTimeRef.current;
+      overlayRendererRef.current?.update(timeMs, isPlayingRef.current, selectedOverlayIdRef.current);
       const lastTimeMs = lastTickTimeMsRef.current;
       const hasTimeJump = lastTimeMs !== null && Math.abs(timeMs - lastTimeMs) > 200;
       const nowPerf = performance.now();
@@ -1823,7 +1915,7 @@ function VideoPlayback(
           }
         });
         
-        console.log('[Overlay Debug][ticker]', {
+        logOverlayDebugExpanded('[Overlay Debug][ticker]', {
           timeMs: roundedTimeMs,
           hasTimeJump,
           hasZoomChange,
@@ -1903,7 +1995,7 @@ function VideoPlayback(
         app.ticker.remove(ticker);
       }
     };
-  }, [pixiReady, videoReady, clampFocusToStage, applyEffectTransform, applyZoomToOverlays]);
+  }, [pixiReady, videoReady, clampFocusToStage, applyEffectTransform, applyZoomToOverlays, logOverlayDebugExpanded]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     const video = e.currentTarget;
@@ -2095,7 +2187,7 @@ function VideoPlayback(
     const { region: dominantZoom, strength } = findDominantRegion(zoomRegions, timeMs);
     const effectState = effectStateRef.current;
 
-    console.log('[Overlay Debug][scrub]', {
+    logOverlayDebugExpanded('[Overlay Debug][scrub]', {
       timeMs,
       stage: { width: stageWidth, height: stageHeight },
       zoom: {
@@ -2119,7 +2211,7 @@ function VideoPlayback(
       overlayTransform: overlayLayer?.style.transform || 'none',
       activeOverlays,
     });
-  }, [getOverlayDebugMode, overlayRegions, timeMs, zoomRegions]);
+  }, [getOverlayDebugMode, overlayRegions, timeMs, zoomRegions, logOverlayDebugExpanded]);
 
   const getActiveAnnotations = (layer?: 'foreground' | 'midground') => {
     const filtered = (annotationRegions || []).filter((annotation) => {
@@ -2168,7 +2260,7 @@ function VideoPlayback(
         <div
           ref={screenGroupRef}
           className="absolute inset-0 will-change-transform"
-          style={{ filter: shadowFilter }}
+          style={{ filter: shadowFilter, transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
         >
           {pixiReady && videoReady && (
             <div
@@ -2235,7 +2327,7 @@ function VideoPlayback(
             <div
               ref={overlayVideoLayerRef}
               className="absolute inset-0 select-none"
-              style={{ zIndex: 8, pointerEvents: selectedOverlayId && !isPlaying ? 'auto' : 'none' }}
+              style={{ zIndex: 8, pointerEvents: selectedOverlayId && !isPlaying ? 'auto' : 'none', transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
             >
               {(() => {
                 if (!activeOverlayRegions.length) return null;
@@ -2249,7 +2341,7 @@ function VideoPlayback(
                 if (isOverlayDebugEnabled()) {
                   const layerEl = overlayVideoLayerRef.current;
                   const screenGroup = screenGroupRef.current;
-                  console.log('[Overlay Debug][render]', {
+                  logOverlayDebugExpanded('[Overlay Debug][render]', {
                     containerWidth,
                     containerHeight,
                     stageSizeWidth: stageSize.width,
@@ -2257,7 +2349,20 @@ function VideoPlayback(
                     layerClientWidth: layerEl?.clientWidth,
                     layerTransform: layerEl?.style.transform || 'none',
                     screenGroupTransform: screenGroup?.style.transform || 'none',
-                    screenGroupRect: screenGroup?.getBoundingClientRect(),
+                    screenGroupRect: (() => {
+                      if (!screenGroup) return null;
+                      const rect = screenGroup.getBoundingClientRect();
+                      return {
+                        x: rect.x,
+                        y: rect.y,
+                        width: rect.width,
+                        height: rect.height,
+                        top: rect.top,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                        left: rect.left,
+                      };
+                    })(),
                   });
                 }
                 
@@ -2265,13 +2370,11 @@ function VideoPlayback(
                 const parentTransform = overlayVideoLayerRef.current?.style.transform || 'none';
                 
                 return activeOverlayRegions.map((region) => {
-                  const asset = overlayAssetMap.get(region.assetId);
-                  if (!asset) return null;
+                  if (!overlayAssetMap.has(region.assetId)) return null;
                   return (
                     <OverlayVideoItem
                       key={region.id}
                       region={region}
-                      asset={asset}
                       containerWidth={containerWidth}
                       containerHeight={containerHeight}
                       currentTimeMs={timeMs}
@@ -2293,7 +2396,7 @@ function VideoPlayback(
             <div
               ref={overlayRef}
               className="absolute inset-0 select-none"
-              style={{ pointerEvents: 'none', zIndex: 10 }}
+              style={{ pointerEvents: 'none', zIndex: 10, transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
               onPointerDown={handleOverlayPointerDown}
               onPointerMove={handleOverlayPointerMove}
               onPointerUp={handleOverlayPointerUp}

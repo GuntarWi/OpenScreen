@@ -1,12 +1,11 @@
 import { cn } from "@/lib/utils";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getAssetPath } from "@/lib/assetPath";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState } from "react";
 import Block from '@uiw/react-color-block';
 import { Trash2, Download, Crop, X, Bug, Upload, Star } from "lucide-react";
 import { toast } from "sonner";
@@ -78,6 +77,7 @@ interface SettingsPanelProps {
   onOverlayAssetRemove?: (id: string) => void;
   onOverlayAddToTimeline?: (assetId: string) => void;
   onOverlayRegionChange?: (id: string, patch: Partial<OverlayVideoRegion>) => void;
+  onOverlayOrderChange?: (orderedIds: string[]) => void;
   cropRegion?: CropRegion;
   onCropChange?: (region: CropRegion) => void;
   aspectRatio: AspectRatio;
@@ -162,7 +162,8 @@ export function SettingsPanel({
   onOverlayAssetRemove,
   onOverlayAddToTimeline,
   onOverlayRegionChange,
-  cropRegion, 
+  onOverlayOrderChange,
+  cropRegion,
   onCropChange, 
   aspectRatio, 
   videoElement, 
@@ -227,6 +228,17 @@ export function SettingsPanel({
   
   const [selectedColor, setSelectedColor] = useState('#ADADAD');
   const [gradient, setGradient] = useState<string>(GRADIENTS[0]);
+  const [draggingOverlayId, setDraggingOverlayId] = useState<string | null>(null);
+  const [dragOverOverlayId, setDragOverOverlayId] = useState<string | null>(null);
+
+  const overlayAssetMap = useMemo(
+    () => new Map(overlayAssets.map((asset) => [asset.id, asset])),
+    [overlayAssets],
+  );
+  const overlayLayerOrder = useMemo(
+    () => [...overlayRegions].sort((a, b) => b.zIndex - a.zIndex),
+    [overlayRegions],
+  );
   const [showCropDropdown, setShowCropDropdown] = useState(false);
   const screenOffsetX = screenOffset?.x ?? 0;
   const screenOffsetY = screenOffset?.y ?? 0;
@@ -234,6 +246,45 @@ export function SettingsPanel({
   const selectedOverlay = selectedOverlayId
     ? overlayRegions.find((region) => region.id === selectedOverlayId) ?? null
     : null;
+  const overlayOrderIds = useMemo(
+    () => overlayLayerOrder.map((region) => region.id),
+    [overlayLayerOrder],
+  );
+
+  const handleOverlayDragStart = (id: string) => (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onOverlayOrderChange) return;
+    event.dataTransfer.setData('text/plain', id);
+    event.dataTransfer.effectAllowed = 'move';
+    setDraggingOverlayId(id);
+  };
+
+  const handleOverlayDragOver = (id: string) => (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onOverlayOrderChange) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverOverlayId(id);
+  };
+
+  const handleOverlayDrop = (targetId: string) => (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onOverlayOrderChange) return;
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData('text/plain') || draggingOverlayId;
+    setDragOverOverlayId(null);
+    setDraggingOverlayId(null);
+    if (!draggedId || draggedId === targetId) return;
+    const nextOrder = [...overlayOrderIds];
+    const fromIndex = nextOrder.indexOf(draggedId);
+    const toIndex = nextOrder.indexOf(targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    nextOrder.splice(fromIndex, 1);
+    nextOrder.splice(toIndex, 0, draggedId);
+    onOverlayOrderChange?.(nextOrder);
+  };
+
+  const handleOverlayDragEnd = () => {
+    setDragOverOverlayId(null);
+    setDraggingOverlayId(null);
+  };
   // Local follow state to allow toggling even if parent doesn't pass handler
   const [zoomFollowEnabledLocal, setZoomFollowEnabledLocal] = useState<boolean>(Boolean((zoomFollowEnabled as boolean) || false));
   useEffect(() => {
@@ -1185,6 +1236,47 @@ export function SettingsPanel({
               Drag a video to the timeline overlay row, or tap Add to place at the playhead.
             </p>
           </div>
+          {overlayLayerOrder.length > 0 && (
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Overlay Layers</div>
+                <span className="text-[10px] text-slate-500">Top renders in front</span>
+              </div>
+              <div className="space-y-2">
+                {overlayLayerOrder.map((region) => {
+                  const asset = overlayAssetMap.get(region.assetId);
+                  const label = asset?.name || 'Overlay';
+                  const isSelected = region.id === selectedOverlayId;
+                  const isDragging = draggingOverlayId === region.id;
+                  const isDragOver = dragOverOverlayId === region.id;
+                  return (
+                    <div
+                      key={region.id}
+                      draggable={Boolean(onOverlayOrderChange)}
+                      onDragStart={handleOverlayDragStart(region.id)}
+                      onDragOver={handleOverlayDragOver(region.id)}
+                      onDrop={handleOverlayDrop(region.id)}
+                      onDragEnd={handleOverlayDragEnd}
+                      className={cn(
+                        "flex items-center justify-between rounded-lg border px-3 py-2 text-xs text-slate-200",
+                        isSelected ? "border-[#34B27B] bg-[#34B27B]/10" : "border-white/10 bg-black/20",
+                        isDragging ? "opacity-60" : "",
+                        isDragOver ? "ring-1 ring-[#34B27B]" : ""
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-[#34B27B]" />
+                        <span className="truncate max-w-[170px]">{label}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {Math.max(0, (region.endMs - region.startMs) / 1000).toFixed(1)}s
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {selectedOverlay && onOverlayRegionChange && (
             <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
               <div className="flex items-center justify-between">
