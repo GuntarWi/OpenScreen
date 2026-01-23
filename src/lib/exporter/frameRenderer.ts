@@ -73,10 +73,16 @@ export class FrameRenderer {
   private overlayVideoReady = new Map<string, Promise<void>>();
   private overlayVideoTimes = new Map<string, number>();
   private overlayChromaCanvases = new Map<string, HTMLCanvasElement>();
+  private screenOffsetPx = { x: 0, y: 0 };
 
   constructor(config: FrameRenderConfig) {
     this.config = config;
     this.overlayAssetMap = new Map((config.overlayAssets || []).map((asset) => [asset.id, asset]));
+    const screenOffset = config.screenOffset || { x: 0, y: 0 };
+    this.screenOffsetPx = {
+      x: (screenOffset.x / 100) * config.width,
+      y: (screenOffset.y / 100) * config.height,
+    };
     this.animationState = {
       scale: 1,
       focusX: DEFAULT_FOCUS.cx,
@@ -111,6 +117,8 @@ export class FrameRenderer {
       antialias: false,
       resolution: 1,
       autoDensity: true,
+      autoStart: false,
+      sharedTicker: false,
     });
 
     // Setup containers
@@ -384,8 +392,7 @@ export class FrameRenderer {
     timeMs: number,
     canvasWidth: number,
     canvasHeight: number,
-    zoomState?: { scale: number; focusX: number; focusY: number },
-    screenOffsetPx?: { x: number; y: number }
+    zoomState?: { scale: number; focusX: number; focusY: number }
   ): Promise<void> {
     const overlayRegions = this.config.overlayRegions || [];
     if (!overlayRegions.length) return;
@@ -396,12 +403,6 @@ export class FrameRenderer {
     const scaleX = canvasWidth / previewWidth;
     const scaleY = canvasHeight / previewHeight;
     const scaleFactor = (scaleX + scaleY) / 2;
-
-    // Apply screenOffset only when overlays are drawn directly on the composite canvas.
-    // When overlays are drawn on the screen canvas, the screenOffset is applied later
-    // to the whole screen, so keep this at zero.
-    const offsetX = screenOffsetPx?.x ?? 0;
-    const offsetY = screenOffsetPx?.y ?? 0;
 
     // Apply zoom transform if active
     const zoomScale = zoomState?.scale ?? 1;
@@ -460,13 +461,13 @@ export class FrameRenderer {
 
       if (!layout) continue;
 
-      const boxX = layout.box.x * scaleX + offsetX;
-      const boxY = layout.box.y * scaleY + offsetY;
+      const boxX = layout.box.x * scaleX;
+      const boxY = layout.box.y * scaleY;
       const boxWidth = layout.box.width * scaleX;
       const boxHeight = layout.box.height * scaleY;
 
-      const destX = layout.dest.x * scaleX + offsetX;
-      const destY = layout.dest.y * scaleY + offsetY;
+      const destX = layout.dest.x * scaleX;
+      const destY = layout.dest.y * scaleY;
       const destW = layout.dest.width * scaleX;
       const destH = layout.dest.height * scaleY;
 
@@ -483,8 +484,6 @@ export class FrameRenderer {
           canvasHeight,
           scaleX: scaleX.toFixed(4),
           scaleY: scaleY.toFixed(4),
-          screenOffsetX: offsetX.toFixed(1),
-          screenOffsetY: offsetY.toFixed(1),
           zoomScale: zoomScale.toFixed(4),
           zoomFocusX: zoomFocusX.toFixed(4),
           zoomFocusY: zoomFocusY.toFixed(4),
@@ -588,15 +587,17 @@ export class FrameRenderer {
 
     // Create or update video sprite from VideoFrame
     if (!this.videoSprite) {
-      const texture = Texture.from(videoFrame as any);
+      const texture = Texture.from(videoFrame as any, true);
       this.videoSprite = new Sprite(texture);
       this.videoContainer.addChild(this.videoSprite);
     } else {
       // Destroy old texture to avoid memory leaks, then create new one
       const oldTexture = this.videoSprite.texture;
-      const newTexture = Texture.from(videoFrame as any);
+      const newTexture = Texture.from(videoFrame as any, true);
       this.videoSprite.texture = newTexture;
-      oldTexture.destroy(true);
+      if (oldTexture && oldTexture !== newTexture) {
+        oldTexture.destroy(true);
+      }
     }
 
     const timeMs = this.currentVideoTime * 1000;
@@ -625,6 +626,7 @@ export class FrameRenderer {
       isPlaying: true,
       motionBlurEnabled: this.config.motionBlurEnabled ?? true,
     });
+    this.applyScreenOffsetToVideo(this.animationState.scale);
 
     // Render the PixiJS stage to its canvas (video only, transparent background)
     this.app.renderer.render(this.app.stage);
@@ -696,6 +698,17 @@ export class FrameRenderer {
       baseOffset: { x: centerOffsetX, y: centerOffsetY },
       maskRect: { x: 0, y: 0, width: croppedDisplayWidth, height: croppedDisplayHeight },
     };
+  }
+
+  private applyScreenOffsetToVideo(zoomScale: number): void {
+    if (!this.videoContainer || !this.layoutCache) return;
+
+    const invScale = zoomScale !== 0 ? 1 / zoomScale : 0;
+    const offsetX = this.screenOffsetPx.x * invScale;
+    const offsetY = this.screenOffsetPx.y * invScale;
+
+    this.videoContainer.x = this.layoutCache.baseOffset.x + offsetX;
+    this.videoContainer.y = this.layoutCache.baseOffset.y + offsetY;
   }
 
   private clampFocusToStage(focus: { cx: number; cy: number }, depth: number): { cx: number; cy: number } {
@@ -1108,9 +1121,6 @@ export class FrameRenderer {
     const scaleX = this.config.width / previewWidth;
     const scaleY = this.config.height / previewHeight;
     const scaleFactor = (scaleX + scaleY) / 2;
-    const screenOffset = this.config.screenOffset || { x: 0, y: 0 };
-    const screenOffsetX = (screenOffset.x / 100) * w;
-    const screenOffsetY = (screenOffset.y / 100) * h;
 
     // Clear composite canvas
     ctx.clearRect(0, 0, w, h);
@@ -1177,8 +1187,8 @@ export class FrameRenderer {
       finalScreenOffsetY = effectResult.offsetY;
     }
 
-    const drawX = screenOffsetX + finalScreenOffsetX;
-    const drawY = screenOffsetY + finalScreenOffsetY;
+    const drawX = finalScreenOffsetX;
+    const drawY = finalScreenOffsetY;
 
     if (this.config.showShadow && this.config.shadowIntensity > 0) {
       const intensity = this.config.shadowIntensity;
@@ -1238,6 +1248,9 @@ export class FrameRenderer {
     this.overlayAssetMap.clear();
     this.backgroundSprite = null;
     if (this.app) {
+      if (this.app.ticker) {
+        this.app.ticker.stop();
+      }
       this.app.destroy(true, { children: true, texture: true, textureSource: true });
       this.app = null;
     }

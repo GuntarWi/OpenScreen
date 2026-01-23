@@ -188,8 +188,12 @@ function VideoPlayback(
   const stageSizeRef = useRef({ width: 0, height: 0 });
   const videoSizeRef = useRef({ width: 0, height: 0 });
   const baseScaleRef = useRef(1);
+  const baseOffsetRawRef = useRef({ x: 0, y: 0 });
   const baseOffsetRef = useRef({ x: 0, y: 0 });
+  const baseMaskRawRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const baseMaskRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const screenOffsetPxRef = useRef({ x: 0, y: 0 });
+  const videoContainerBaseRef = useRef({ x: 0, y: 0 });
   const cropBoundsRef = useRef({ startX: 0, endX: 0, startY: 0, endY: 0 });
   const maskGraphicsRef = useRef<Graphics | null>(null);
   const isPlayingRef = useRef(isPlaying);
@@ -372,6 +376,8 @@ function VideoPlayback(
   const applyZoomToOverlays = useCallback((zoomScale: number, focusX: number, focusY: number) => {
     const overlayLayer = overlayVideoLayerRef.current;
     const annotationLayer = overlayRef.current;
+    const screenOffsetPx = screenOffsetPxRef.current;
+    const hasScreenOffset = Boolean(screenOffsetPx.x || screenOffsetPx.y);
 
     const resetTransform = (layer: HTMLDivElement | null) => {
       if (!layer) return;
@@ -382,7 +388,14 @@ function VideoPlayback(
     if (zoomScale === 1 && focusX === 0.5 && focusY === 0.5) {
       // No zoom - reset transform
       resetTransform(overlayLayer);
-      resetTransform(annotationLayer);
+      if (annotationLayer) {
+        if (hasScreenOffset) {
+          annotationLayer.style.transformOrigin = '0 0';
+          annotationLayer.style.transform = `translate3d(${screenOffsetPx.x}px, ${screenOffsetPx.y}px, 0)`;
+        } else {
+          resetTransform(annotationLayer);
+        }
+      }
       if (isOverlayDebugEnabled() && overlayDebugLastTransformRef.current !== 'none') {
         overlayDebugLastTransformRef.current = 'none';
         logOverlayDebug('zoom-reset', { zoomScale, focusX, focusY });
@@ -390,7 +403,7 @@ function VideoPlayback(
       return;
     }
 
-    const applyLayerTransform = (layer: HTMLDivElement | null) => {
+    const applyLayerTransform = (layer: HTMLDivElement | null, offsetPx?: { x: number; y: number }) => {
       if (!layer) return;
 
       const stageSize = stageSizeRef.current;
@@ -402,9 +415,14 @@ function VideoPlayback(
       const focusStagePxY = focusY * height;
       const stageCenterX = width / 2;
       const stageCenterY = height / 2;
+      const offsetX = offsetPx?.x ?? 0;
+      const offsetY = offsetPx?.y ?? 0;
+      const offsetTransform = offsetX || offsetY
+        ? `translate3d(${offsetX}px, ${offsetY}px, 0) `
+        : '';
 
       // Match the Pixi camera transform: translate to center, scale, translate focus to origin.
-      const transform = `translate3d(${stageCenterX}px, ${stageCenterY}px, 0) scale3d(${zoomScale}, ${zoomScale}, 1) translate3d(${-focusStagePxX}px, ${-focusStagePxY}px, 0)`;
+      const transform = `${offsetTransform}translate3d(${stageCenterX}px, ${stageCenterY}px, 0) scale3d(${zoomScale}, ${zoomScale}, 1) translate3d(${-focusStagePxX}px, ${-focusStagePxY}px, 0)`;
       layer.style.transformOrigin = '0 0';
       layer.style.transform = transform;
       layer.style.transformStyle = 'preserve-3d';
@@ -423,7 +441,7 @@ function VideoPlayback(
     };
 
     applyLayerTransform(overlayLayer);
-    applyLayerTransform(annotationLayer);
+    applyLayerTransform(annotationLayer, screenOffsetPx);
   }, [logOverlayDebug]);
 
   // Load default cursor SVG image
@@ -575,6 +593,54 @@ function VideoPlayback(
     return clampFocusToStageUtil(focus, depth, stageSizeRef.current);
   }, []);
 
+  const updateScreenOffsetRefs = useCallback((stageWidth?: number, stageHeight?: number) => {
+    const width = stageWidth ?? stageSizeRef.current.width;
+    const height = stageHeight ?? stageSizeRef.current.height;
+    const offsetX = width ? ((screenOffset?.x ?? 0) / 100) * width : 0;
+    const offsetY = height ? ((screenOffset?.y ?? 0) / 100) * height : 0;
+
+    screenOffsetPxRef.current = { x: offsetX, y: offsetY };
+
+    const baseOffset = baseOffsetRawRef.current;
+    baseOffsetRef.current = { x: baseOffset.x + offsetX, y: baseOffset.y + offsetY };
+
+    const baseMask = baseMaskRawRef.current;
+    baseMaskRef.current = {
+      x: baseMask.x + offsetX,
+      y: baseMask.y + offsetY,
+      width: baseMask.width,
+      height: baseMask.height,
+    };
+  }, [screenOffset]);
+
+  const applyScreenOffsetToVideo = useCallback(() => {
+    const videoStage = videoContainerRef.current;
+    if (!videoStage) return;
+
+    const zoomScale = animationStateRef.current.scale || 1;
+    const offset = screenOffsetPxRef.current;
+    const base = videoContainerBaseRef.current;
+    const localX = zoomScale !== 0 ? offset.x / zoomScale : 0;
+    const localY = zoomScale !== 0 ? offset.y / zoomScale : 0;
+
+    videoStage.position.set(base.x + localX, base.y + localY);
+  }, []);
+
+  const applyScreenOffsetToMidground = useCallback(() => {
+    const midground = midgroundRef.current;
+    if (!midground) return;
+
+    const offset = screenOffsetPxRef.current;
+    if (offset.x || offset.y) {
+      midground.style.transform = `translate3d(${offset.x}px, ${offset.y}px, 0)`;
+      midground.style.transformOrigin = '0 0';
+      return;
+    }
+
+    midground.style.transform = '';
+    midground.style.transformOrigin = '';
+  }, []);
+
   // Helper: compute stage pixel coords (pre-camera transform) from normalized video coords (nx, ny)
   const getStageCoordsFromNormalized = useCallback((nx: number, ny: number) => {
     const lockedDims = lockedVideoDimensionsRef.current;
@@ -667,13 +733,22 @@ function VideoPlayback(
       stageSizeRef.current = result.stageSize;
       videoSizeRef.current = result.videoSize;
       baseScaleRef.current = result.baseScale;
-      baseOffsetRef.current = result.baseOffset;
-      baseMaskRef.current = result.maskRect;
+      baseOffsetRawRef.current = result.baseOffset;
+      baseMaskRawRef.current = result.maskRect;
       cropBoundsRef.current = result.cropBounds;
 
       // Reset camera container to identity
       cameraContainer.scale.set(1);
       cameraContainer.position.set(0, 0);
+
+      const videoStage = videoContainerRef.current;
+      if (videoStage) {
+        videoContainerBaseRef.current = { x: videoStage.position.x, y: videoStage.position.y };
+      }
+
+      updateScreenOffsetRefs(result.stageSize.width, result.stageSize.height);
+      applyScreenOffsetToVideo();
+      applyScreenOffsetToMidground();
 
       const selectedId = selectedZoomIdRef.current;
       const activeRegion = selectedId
@@ -688,7 +763,7 @@ function VideoPlayback(
         overlayRenderer.syncRegions(overlayRegionsRef.current);
       }
     }
-  }, [updateOverlayForRegion, cropRegion, borderRadius, padding]);
+  }, [updateOverlayForRegion, cropRegion, borderRadius, padding, updateScreenOffsetRefs, applyScreenOffsetToVideo, applyScreenOffsetToMidground]);
 
   useEffect(() => {
     layoutVideoContentRef.current = layoutVideoContent;
@@ -826,6 +901,12 @@ function VideoPlayback(
   useEffect(() => {
     selectedOverlayIdRef.current = selectedOverlayId ?? null;
   }, [selectedOverlayId]);
+
+  useEffect(() => {
+    updateScreenOffsetRefs();
+    applyScreenOffsetToVideo();
+    applyScreenOffsetToMidground();
+  }, [screenOffset, updateScreenOffsetRefs, applyScreenOffsetToVideo, applyScreenOffsetToMidground]);
 
   useEffect(() => {
     if (!pixiReady || !videoReady) return;
@@ -983,11 +1064,12 @@ function VideoPlayback(
           isPlaying: isPlayingRef.current,
           motionBlurEnabled: motionBlurEnabledRef.current,
         });
+        applyScreenOffsetToVideo();
       }
     } catch (err) {
       // swallow; this is an opportunistic snap
     }
-  }, [pixiReady, videoReady]);
+  }, [pixiReady, videoReady, applyScreenOffsetToVideo]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -1060,6 +1142,7 @@ function VideoPlayback(
         isPlaying: false,
         motionBlurEnabled: motionBlurEnabledRef.current,
       });
+      applyScreenOffsetToVideo();
 
       requestAnimationFrame(() => {
         const finalApp = appRef.current;
@@ -1072,7 +1155,7 @@ function VideoPlayback(
         }
       });
     });
-  }, [pixiReady, videoReady, layoutVideoContent, cropRegion]);
+  }, [pixiReady, videoReady, layoutVideoContent, cropRegion, applyScreenOffsetToVideo]);
 
   useEffect(() => {
     if (!pixiReady || !videoReady) return;
@@ -1937,6 +2020,7 @@ function VideoPlayback(
         state.focusX = targetFocus.cx;
         state.focusY = targetFocus.cy;
         applyTransform(0);
+        applyScreenOffsetToVideo();
         applyEffectTransform(effectState);
         applyZoomToOverlays(state.scale, state.focusX, state.focusY);
         lastTickTimeMsRef.current = timeMs;
@@ -1984,6 +2068,7 @@ function VideoPlayback(
       );
 
       applyTransform(motionIntensity);
+      applyScreenOffsetToVideo();
       applyEffectTransform(effectState);
       applyZoomToOverlays(state.scale, state.focusX, state.focusY);
       lastTickTimeMsRef.current = timeMs;
@@ -1995,7 +2080,7 @@ function VideoPlayback(
         app.ticker.remove(ticker);
       }
     };
-  }, [pixiReady, videoReady, clampFocusToStage, applyEffectTransform, applyZoomToOverlays, logOverlayDebugExpanded]);
+  }, [pixiReady, videoReady, clampFocusToStage, applyEffectTransform, applyZoomToOverlays, applyScreenOffsetToVideo, logOverlayDebugExpanded]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     const video = e.currentTarget;
@@ -2236,11 +2321,6 @@ function VideoPlayback(
   const shadowFilter = (showShadow && shadowIntensity > 0)
     ? `drop-shadow(0 ${shadowIntensity * 12}px ${shadowIntensity * 48}px rgba(0,0,0,${shadowIntensity * 0.7})) drop-shadow(0 ${shadowIntensity * 4}px ${shadowIntensity * 16}px rgba(0,0,0,${shadowIntensity * 0.5})) drop-shadow(0 ${shadowIntensity * 2}px ${shadowIntensity * 8}px rgba(0,0,0,${shadowIntensity * 0.3}))`
     : 'none';
-  const screenOffsetX = screenOffset?.x ?? 0;
-  const screenOffsetY = screenOffset?.y ?? 0;
-  const screenOffsetStyle = (screenOffsetX || screenOffsetY)
-    ? { transform: `translate3d(${screenOffsetX}%, ${screenOffsetY}%, 0)` }
-    : undefined;
 
   return (
     <div className="relative rounded-sm overflow-hidden" style={{ width: '100%', aspectRatio: formatAspectRatioForCSS(aspectRatio) }}>
@@ -2253,10 +2333,7 @@ function VideoPlayback(
         }}
       />
 
-      <div
-        className="absolute inset-0"
-        style={screenOffsetStyle}
-      >
+      <div className="absolute inset-0">
         <div
           ref={screenGroupRef}
           className="absolute inset-0 will-change-transform"
