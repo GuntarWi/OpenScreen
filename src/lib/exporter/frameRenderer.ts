@@ -1,15 +1,13 @@
-import { Application, Container, Sprite, Graphics, BlurFilter, Texture } from 'pixi.js';
-import type { ZoomRegion, CropRegion, AnnotationRegion, EffectRegion, ScreenOffset, OverlayVideoAsset, OverlayVideoRegion, PaddingKeyframe } from '@/components/video-editor/types';
+import { Application, BlurFilter } from 'pixi.js';
+import { RECORDING_ASSET_ID, type ZoomRegion, CropRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe } from '@/components/video-editor/types';
 import { interpolatePadding } from '@/utils/paddingKeyframes';
 import { ZOOM_DEPTH_SCALES } from '@/components/video-editor/types';
 import { findDominantRegion } from '@/components/video-editor/videoPlayback/zoomRegionUtils';
-import { applyZoomTransform } from '@/components/video-editor/videoPlayback/zoomTransform';
 import { DEFAULT_FOCUS, SMOOTHING_FACTOR, MIN_DELTA } from '@/components/video-editor/videoPlayback/constants';
 import { clampFocusToStage as clampFocusToStageUtil } from '@/components/video-editor/videoPlayback/focusUtils';
 import { renderAnnotations } from './annotationRenderer';
-import { applyChromaKeyToImageData, parseHexColor } from '@/utils/chromaKey';
 import { computeEffectState, type CombinedEffectState } from '@/components/video-editor/videoPlayback/effectUtils';
-import { computeOverlayLayout } from '@/utils/overlayLayout';
+import { ClipPixiRenderer } from '@/components/video-editor/videoPlayback/clipPixiRenderer';
 
 const EFFECT_PERSPECTIVE = 1200;
 const SKEW_TO_TILT_RATIO = 0.55;
@@ -33,8 +31,8 @@ interface FrameRenderConfig {
   videoWidth: number;
   videoHeight: number;
   annotationRegions?: AnnotationRegion[];
-  overlayAssets?: OverlayVideoAsset[];
-  overlayRegions?: OverlayVideoRegion[];
+  videoAssets?: VideoAsset[];
+  videoClips?: VideoClip[];
   effectRegions?: EffectRegion[];
   previewWidth?: number;
   previewHeight?: number;
@@ -46,15 +44,11 @@ interface AnimationState {
   focusY: number;
 }
 
-// Renders video frames with all effects (background, zoom, crop, blur, shadow) to an offscreen canvas for export.
+// Renders video frames with all effects (background, zoom, crop, blur, shadow, clips) to an offscreen canvas for export.
 
 export class FrameRenderer {
   private app: Application | null = null;
-  private cameraContainer: Container | null = null;
-  private videoContainer: Container | null = null;
-  private videoSprite: Sprite | null = null;
-  private backgroundSprite: Sprite | null = null;
-  private maskGraphics: Graphics | null = null;
+  private backgroundSprite: HTMLCanvasElement | null = null;
   private blurFilter: BlurFilter | null = null;
   private shadowCanvas: HTMLCanvasElement | null = null;
   private shadowCtx: CanvasRenderingContext2D | null = null;
@@ -68,16 +62,13 @@ export class FrameRenderer {
   private animationState: AnimationState;
   private layoutCache: any = null;
   private currentVideoTime = 0;
-  private overlayAssetMap: Map<string, OverlayVideoAsset> = new Map();
-  private overlayVideos = new Map<string, HTMLVideoElement>();
-  private overlayVideoReady = new Map<string, Promise<void>>();
-  private overlayVideoTimes = new Map<string, number>();
-  private overlayChromaCanvases = new Map<string, HTMLCanvasElement>();
+  private clipRenderer: ClipPixiRenderer | null = null;
   private screenOffsetPx = { x: 0, y: 0 };
+  private recordingClipIds: string[] = [];
+  private recordingVideo: HTMLVideoElement | null = null;
 
   constructor(config: FrameRenderConfig) {
     this.config = config;
-    this.overlayAssetMap = new Map((config.overlayAssets || []).map((asset) => [asset.id, asset]));
     const screenOffset = config.screenOffset || { x: 0, y: 0 };
     this.screenOffsetPx = {
       x: (screenOffset.x / 100) * config.width,
@@ -121,21 +112,26 @@ export class FrameRenderer {
       sharedTicker: false,
     });
 
-    // Setup containers
-    this.cameraContainer = new Container();
-    this.videoContainer = new Container();
-    this.app.stage.addChild(this.cameraContainer);
-    this.cameraContainer.addChild(this.videoContainer);
+    // Setup renderer for all clips
+    this.app.stage.sortableChildren = true;
+    this.clipRenderer = new ClipPixiRenderer(this.app.stage);
+    this.clipRenderer.setZIndex(1);
+    this.clipRenderer.setAssets(this.config.videoAssets || []);
+    this.clipRenderer.syncClips(this.config.videoClips || []);
+    this.clipRenderer.setStageSize({ width: this.config.width, height: this.config.height });
+    this.recordingClipIds = this.getRecordingClipIds();
+    if (this.recordingVideo) {
+      this.clipRenderer.setExternalVideo(RECORDING_ASSET_ID, this.recordingVideo, { allowSeek: false });
+    }
 
     // Setup background (render separately, not in PixiJS)
     await this.setupBackground();
 
-    // Setup blur filter for video container
+    // Setup blur filter for recording clip(s)
     this.blurFilter = new BlurFilter();
     this.blurFilter.quality = 3;
     this.blurFilter.resolution = this.app.renderer.resolution;
     this.blurFilter.blur = 0;
-    this.videoContainer.filters = [this.blurFilter];
 
     // Setup composite canvas for final output with shadows
     this.compositeCanvas = document.createElement('canvas');
@@ -179,12 +175,8 @@ export class FrameRenderer {
       }
     }
 
-    // Setup mask
-    this.maskGraphics = new Graphics();
-    this.videoContainer.addChild(this.maskGraphics);
-    this.videoContainer.mask = this.maskGraphics;
+    this.updateLayout(0);
 
-    await this.initializeOverlayVideos();
   }
 
   private async setupBackground(): Promise<void> {
@@ -301,304 +293,15 @@ export class FrameRenderer {
     }
 
     // Store the background canvas for compositing
-    this.backgroundSprite = bgCanvas as any;
+    this.backgroundSprite = bgCanvas;
   }
 
-  private async initializeOverlayVideos(): Promise<void> {
-    const assets = this.config.overlayAssets || [];
-    if (!assets.length) return;
-
-    await Promise.all(assets.map((asset) => this.loadOverlayVideo(asset)));
-  }
-
-  private async loadOverlayVideo(asset: OverlayVideoAsset): Promise<void> {
-    const video = document.createElement('video');
-    video.preload = 'auto';
-    video.muted = true;
-    video.playsInline = true;
-    if (asset.src.startsWith('http')) {
-      video.crossOrigin = 'anonymous';
-    }
-
-    const readyPromise = new Promise<void>((resolve, reject) => {
-      const handleLoaded = () => resolve();
-      const handleError = () => reject(new Error(`Failed to load overlay video: ${asset.src}`));
-      video.addEventListener('loadeddata', handleLoaded, { once: true });
-      video.addEventListener('error', handleError, { once: true });
-    });
-
-    video.src = asset.src;
-
-    this.overlayVideos.set(asset.id, video);
-    this.overlayVideoReady.set(asset.id, readyPromise);
-
-    try {
-      await readyPromise;
-      video.currentTime = 0;
-      video.pause();
-    } catch (error) {
-      console.warn('[FrameRenderer] Failed to load overlay video:', error);
-      this.overlayVideos.delete(asset.id);
-      this.overlayVideoReady.delete(asset.id);
-    }
-  }
-
-  private async seekOverlayVideo(
-    asset: OverlayVideoAsset,
-    localTimeMs: number
-  ): Promise<HTMLVideoElement | null> {
-    const video = this.overlayVideos.get(asset.id);
-    if (!video) return null;
-
-    const readyPromise = this.overlayVideoReady.get(asset.id);
-    if (readyPromise) {
-      try {
-        await readyPromise;
-      } catch {
-        return null;
-      }
-    }
-
-    const durationMs = asset.durationMs > 0 ? asset.durationMs : Math.max(0, (video.duration || 0) * 1000);
-    const maxMs = durationMs > 0 ? Math.max(0, durationMs - 1) : 0;
-    const clampedMs = durationMs > 0 ? Math.min(Math.max(localTimeMs, 0), maxMs) : Math.max(localTimeMs, 0);
-    const targetSeconds = clampedMs / 1000;
-
-    if (!Number.isFinite(targetSeconds)) return video;
-
-    const lastTime = this.overlayVideoTimes.get(asset.id);
-    if (typeof lastTime === 'number' && Math.abs(lastTime - targetSeconds) < 0.002 && video.readyState >= 2) {
-      return video;
-    }
-
-    await new Promise<void>((resolve) => {
-      const handleSeeked = () => resolve();
-      const handleError = () => resolve();
-      video.addEventListener('seeked', handleSeeked, { once: true });
-      video.addEventListener('error', handleError, { once: true });
-      try {
-        video.currentTime = targetSeconds;
-      } catch {
-        resolve();
-      }
-    });
-
-    this.overlayVideoTimes.set(asset.id, targetSeconds);
-    return video;
-  }
-
-  private async drawOverlayVideos(
-    ctx: CanvasRenderingContext2D,
-    timeMs: number,
-    canvasWidth: number,
-    canvasHeight: number,
-    zoomState?: { scale: number; focusX: number; focusY: number }
-  ): Promise<void> {
-    const overlayRegions = this.config.overlayRegions || [];
-    if (!overlayRegions.length) return;
-    const debugOverlay = typeof window !== 'undefined' && Boolean((window as any).__openscreen_debugOverlay);
-
-    const previewWidth = this.config.previewWidth || canvasWidth;
-    const previewHeight = this.config.previewHeight || canvasHeight;
-    const scaleX = canvasWidth / previewWidth;
-    const scaleY = canvasHeight / previewHeight;
-    const scaleFactor = (scaleX + scaleY) / 2;
-
-    // Apply zoom transform if active
-    const zoomScale = zoomState?.scale ?? 1;
-    const zoomFocusX = zoomState?.focusX ?? 0.5;
-    const zoomFocusY = zoomState?.focusY ?? 0.5;
-    const hasZoom = zoomScale !== 1 || zoomFocusX !== 0.5 || zoomFocusY !== 0.5;
-
-    const activeRegions = overlayRegions
-      .filter((region) => timeMs >= region.startMs && timeMs <= region.endMs)
-      .sort((a, b) => a.zIndex - b.zIndex);
-
-    const addRoundedRectPath = (
-      context: CanvasRenderingContext2D,
-      x: number,
-      y: number,
-      width: number,
-      height: number,
-      radius: number
-    ) => {
-      const clampedRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
-      if (clampedRadius <= 0) {
-        context.rect(x, y, width, height);
-        return;
-      }
-      if ('roundRect' in context) {
-        (context as any).roundRect(x, y, width, height, clampedRadius);
-        return;
-      }
-      const r = clampedRadius;
-      context.moveTo(x + r, y);
-      context.arcTo(x + width, y, x + width, y + height, r);
-      context.arcTo(x + width, y + height, x, y + height, r);
-      context.arcTo(x, y + height, x, y, r);
-      context.arcTo(x, y, x + width, y, r);
-      context.closePath();
-    };
-
-    for (const region of activeRegions) {
-      const asset = this.overlayAssetMap.get(region.assetId);
-      if (!asset) continue;
-
-      const localMs = Math.max(0, timeMs - region.startMs);
-      const video = await this.seekOverlayVideo(asset, localMs);
-      if (!video || video.readyState < 2) continue;
-
-      const videoWidth = video.videoWidth || asset.width || 1;
-      const videoHeight = video.videoHeight || asset.height || 1;
-
-      const layout = computeOverlayLayout({
-        region,
-        containerWidth: previewWidth,
-        containerHeight: previewHeight,
-        videoWidth,
-        videoHeight,
-      });
-
-      if (!layout) continue;
-
-      const boxX = layout.box.x * scaleX;
-      const boxY = layout.box.y * scaleY;
-      const boxWidth = layout.box.width * scaleX;
-      const boxHeight = layout.box.height * scaleY;
-
-      const destX = layout.dest.x * scaleX;
-      const destY = layout.dest.y * scaleY;
-      const destW = layout.dest.width * scaleX;
-      const destH = layout.dest.height * scaleY;
-
-      if (boxWidth <= 0 || boxHeight <= 0) continue;
-
-      if (debugOverlay) {
-        console.debug('[Overlay Debug][export]', JSON.stringify({
-          timeMs,
-          regionId: region.id,
-          regionPosition: region.position,
-          previewWidth,
-          previewHeight,
-          canvasWidth,
-          canvasHeight,
-          scaleX: scaleX.toFixed(4),
-          scaleY: scaleY.toFixed(4),
-          zoomScale: zoomScale.toFixed(4),
-          zoomFocusX: zoomFocusX.toFixed(4),
-          zoomFocusY: zoomFocusY.toFixed(4),
-          boxX: boxX.toFixed(1),
-          boxY: boxY.toFixed(1),
-          boxWidth: boxWidth.toFixed(1),
-          boxHeight: boxHeight.toFixed(1),
-        }));
-      }
-
-      const radiusPx = Math.max(0, (region.borderRadius ?? 0) * scaleFactor);
-      const chromaKey = region.chromaKey;
-      const chromaEnabled = Boolean(chromaKey?.enabled);
-
-      ctx.save();
-
-      // Apply zoom transform if active
-      if (hasZoom) {
-        const focusX = zoomFocusX * canvasWidth;
-        const focusY = zoomFocusY * canvasHeight;
-        const centerX = canvasWidth / 2;
-        const centerY = canvasHeight / 2;
-        ctx.translate(centerX, centerY);
-        ctx.scale(zoomScale, zoomScale);
-        ctx.translate(-focusX, -focusY);
-      }
-
-      // Always clip to the box for border radius and overflow
-      ctx.beginPath();
-      addRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, radiusPx);
-      ctx.clip();
-
-      const drawOverlaySource = (
-        srcX: number,
-        srcY: number,
-        srcW: number,
-        srcH: number,
-        drawX: number,
-        drawY: number,
-        drawW: number,
-        drawH: number
-      ) => {
-        if (!chromaEnabled) {
-          ctx.drawImage(video, srcX, srcY, srcW, srcH, drawX, drawY, drawW, drawH);
-          return;
-        }
-
-        const canvasKey = region.id;
-        let chromaCanvas = this.overlayChromaCanvases.get(canvasKey);
-        if (!chromaCanvas) {
-          chromaCanvas = document.createElement('canvas');
-          this.overlayChromaCanvases.set(canvasKey, chromaCanvas);
-        }
-
-        const tempW = Math.max(1, Math.ceil(srcW));
-        const tempH = Math.max(1, Math.ceil(srcH));
-        if (chromaCanvas.width !== tempW || chromaCanvas.height !== tempH) {
-          chromaCanvas.width = tempW;
-          chromaCanvas.height = tempH;
-        }
-
-        const chromaCtx = chromaCanvas.getContext('2d', { willReadFrequently: true });
-        if (!chromaCtx) {
-          ctx.drawImage(video, srcX, srcY, srcW, srcH, drawX, drawY, drawW, drawH);
-          return;
-        }
-
-        chromaCtx.clearRect(0, 0, tempW, tempH);
-        chromaCtx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, tempW, tempH);
-        const imageData = chromaCtx.getImageData(0, 0, tempW, tempH);
-        applyChromaKeyToImageData(
-          imageData.data,
-          parseHexColor(chromaKey?.color ?? '#00ff00'),
-          chromaKey?.threshold ?? 0.35,
-          chromaKey?.softness ?? 0.15
-        );
-        chromaCtx.putImageData(imageData, 0, 0);
-        ctx.drawImage(chromaCanvas, 0, 0, tempW, tempH, drawX, drawY, drawW, drawH);
-      };
-
-      drawOverlaySource(
-        layout.src.x,
-        layout.src.y,
-        layout.src.width,
-        layout.src.height,
-        destX,
-        destY,
-        destW,
-        destH
-      );
-      ctx.restore();
-    }
-  }
-
-  async renderFrame(videoFrame: VideoFrame, timestamp: number): Promise<void> {
-    if (!this.app || !this.videoContainer || !this.cameraContainer) {
+  async renderFrame(timestamp: number): Promise<void> {
+    if (!this.app || !this.clipRenderer) {
       throw new Error('Renderer not initialized');
     }
 
     this.currentVideoTime = timestamp / 1000000;
-
-    // Create or update video sprite from VideoFrame
-    if (!this.videoSprite) {
-      const texture = Texture.from(videoFrame as any, true);
-      this.videoSprite = new Sprite(texture);
-      this.videoContainer.addChild(this.videoSprite);
-    } else {
-      // Destroy old texture to avoid memory leaks, then create new one
-      const oldTexture = this.videoSprite.texture;
-      const newTexture = Texture.from(videoFrame as any, true);
-      this.videoSprite.texture = newTexture;
-      if (oldTexture && oldTexture !== newTexture) {
-        oldTexture.destroy(true);
-      }
-    }
 
     const timeMs = this.currentVideoTime * 1000;
 
@@ -614,21 +317,17 @@ export class FrameRenderer {
     }
     
     // Apply transform once with maximum motion intensity from all ticks
-    applyZoomTransform({
-      cameraContainer: this.cameraContainer,
-      blurFilter: this.blurFilter,
-      stageSize: this.layoutCache.stageSize,
-      baseMask: this.layoutCache.maskRect,
-      zoomScale: this.animationState.scale,
+    this.clipRenderer.setCameraTransform({
+      scale: this.animationState.scale,
       focusX: this.animationState.focusX,
       focusY: this.animationState.focusY,
-      motionIntensity: maxMotionIntensity,
-      isPlaying: true,
-      motionBlurEnabled: this.config.motionBlurEnabled ?? true,
     });
-    this.applyScreenOffsetToVideo(this.animationState.scale);
+    this.applyRecordingBlur(maxMotionIntensity);
+    this.applyScreenOffsetToRecording(this.animationState.scale);
 
-    // Render the PixiJS stage to its canvas (video only, transparent background)
+    await this.clipRenderer.prepareFrame(timeMs);
+
+    // Render the PixiJS stage to its canvas (video clips, transparent background)
     this.app.renderer.render(this.app.stage);
 
     // Composite with shadows to final output canvas
@@ -636,7 +335,7 @@ export class FrameRenderer {
   }
 
   private updateLayout(timeMs?: number): void {
-    if (!this.app || !this.videoSprite || !this.maskGraphics || !this.videoContainer) return;
+    if (!this.app) return;
 
     const { width, height } = this.config;
     const { cropRegion, borderRadius = 0, padding: basePadding = 0, paddingKeyframes = [] } = this.config;
@@ -655,7 +354,7 @@ export class FrameRenderer {
 
     const croppedVideoWidth = videoWidth * (cropEndX - cropStartX);
     const croppedVideoHeight = videoHeight * (cropEndY - cropStartY);
-    
+
     // Calculate scale to fit in viewport
     // Padding is a percentage (0-100), where 50% ~ 0.8 scale
     const paddingScale = 1.0 - (padding / 100) * 0.4;
@@ -663,32 +362,26 @@ export class FrameRenderer {
     const viewportHeight = height * paddingScale;
     const scale = Math.min(viewportWidth / croppedVideoWidth, viewportHeight / croppedVideoHeight);
 
-    // Position video sprite
-    this.videoSprite.width = videoWidth * scale;
-    this.videoSprite.height = videoHeight * scale;
-
-    const cropPixelX = cropStartX * videoWidth * scale;
-    const cropPixelY = cropStartY * videoHeight * scale;
-    this.videoSprite.x = -cropPixelX;
-    this.videoSprite.y = -cropPixelY;
-
-    // Position video container
     const croppedDisplayWidth = croppedVideoWidth * scale;
     const croppedDisplayHeight = croppedVideoHeight * scale;
     const centerOffsetX = (width - croppedDisplayWidth) / 2;
     const centerOffsetY = (height - croppedDisplayHeight) / 2;
-    this.videoContainer.x = centerOffsetX;
-    this.videoContainer.y = centerOffsetY;
 
     // scale border radius by export/preview canvas ratio
     const previewWidth = this.config.previewWidth || 1920;
     const previewHeight = this.config.previewHeight || 1080;
     const canvasScaleFactor = Math.min(width / previewWidth, height / previewHeight);
     const scaledBorderRadius = borderRadius * canvasScaleFactor;
-    
-    this.maskGraphics.clear();
-    this.maskGraphics.roundRect(0, 0, croppedDisplayWidth, croppedDisplayHeight, scaledBorderRadius);
-    this.maskGraphics.fill({ color: 0xffffff });
+
+    if (this.clipRenderer) {
+      this.clipRenderer.setStageSize({ width, height });
+      this.clipRenderer.setRecordingLayout({
+        cropRegion,
+        padding,
+        borderRadius: scaledBorderRadius,
+        screenOffsetPx: this.screenOffsetPx,
+      });
+    }
 
     // Cache layout info
     this.layoutCache = {
@@ -700,15 +393,37 @@ export class FrameRenderer {
     };
   }
 
-  private applyScreenOffsetToVideo(zoomScale: number): void {
-    if (!this.videoContainer || !this.layoutCache) return;
+  private applyScreenOffsetToRecording(zoomScale: number): void {
+    if (!this.clipRenderer) return;
+    this.clipRenderer.applyScreenOffset(zoomScale);
+  }
 
-    const invScale = zoomScale !== 0 ? 1 / zoomScale : 0;
-    const offsetX = this.screenOffsetPx.x * invScale;
-    const offsetY = this.screenOffsetPx.y * invScale;
+  setRecordingVideo(video: HTMLVideoElement): void {
+    this.recordingVideo = video;
+    this.recordingClipIds = this.getRecordingClipIds();
+    if (!this.clipRenderer) return;
+    this.clipRenderer.setExternalVideo(RECORDING_ASSET_ID, video, { allowSeek: false });
+  }
 
-    this.videoContainer.x = this.layoutCache.baseOffset.x + offsetX;
-    this.videoContainer.y = this.layoutCache.baseOffset.y + offsetY;
+  private getRecordingClipIds(): string[] {
+    return (this.config.videoClips || [])
+      .filter((clip) => clip.applyCamera || clip.assetId === RECORDING_ASSET_ID)
+      .map((clip) => clip.id);
+  }
+
+  private applyRecordingBlur(motionIntensity: number): void {
+    if (!this.blurFilter || !this.clipRenderer) return;
+    const shouldBlur = (this.config.motionBlurEnabled ?? true) && motionIntensity > 0.0005;
+    const motionBlur = shouldBlur ? Math.min(6, motionIntensity * 120) : 0;
+    this.blurFilter.blur = motionBlur;
+
+    const filters = motionBlur > 0 ? [this.blurFilter] : null;
+    this.recordingClipIds.forEach((id) => {
+      const item = this.clipRenderer?.getClipItem(id);
+      if (item) {
+        item.container.filters = filters;
+      }
+    });
   }
 
   private clampFocusToStage(focus: { cx: number; cy: number }, depth: number): { cx: number; cy: number } {
@@ -1045,7 +760,7 @@ export class FrameRenderer {
   }
 
   private updateAnimationState(timeMs: number): number {
-    if (!this.cameraContainer || !this.layoutCache) return 0;
+    if (!this.layoutCache) return 0;
 
     const { region, strength } = findDominantRegion(this.config.zoomRegions, timeMs);
     
@@ -1131,7 +846,7 @@ export class FrameRenderer {
 
     // Draw background layer (without effect transforms)
     if (this.backgroundSprite) {
-      const bgCanvas = this.backgroundSprite as any as HTMLCanvasElement;
+      const bgCanvas = this.backgroundSprite;
       if (this.config.showBlur) {
         ctx.save();
         ctx.filter = 'blur(6px)';
@@ -1168,11 +883,6 @@ export class FrameRenderer {
     screenCtx.filter = 'none';
     screenCtx.drawImage(videoCanvas, 0, 0, w, h);
     screenCtx.filter = 'none';
-
-    // Draw overlays on the screen canvas so they receive zoom and effect transforms.
-    if (this.config.overlayRegions && this.config.overlayRegions.length > 0) {
-      await this.drawOverlayVideos(screenCtx, timeMs, w, h, this.animationState);
-    }
 
     let finalScreen = this.screenCanvas;
     let finalScreenOffsetX = 0;
@@ -1230,22 +940,10 @@ export class FrameRenderer {
 
 
   destroy(): void {
-    if (this.videoSprite) {
-      this.videoSprite.destroy();
-      this.videoSprite = null;
+    if (this.clipRenderer) {
+      this.clipRenderer.destroy();
+      this.clipRenderer = null;
     }
-    this.overlayVideos.forEach((video) => {
-      try {
-        video.pause();
-        video.src = '';
-      } catch {
-        // ignore cleanup errors
-      }
-    });
-    this.overlayVideos.clear();
-    this.overlayVideoReady.clear();
-    this.overlayVideoTimes.clear();
-    this.overlayAssetMap.clear();
     this.backgroundSprite = null;
     if (this.app) {
       if (this.app.ticker) {
@@ -1254,9 +952,6 @@ export class FrameRenderer {
       this.app.destroy(true, { children: true, texture: true, textureSource: true });
       this.app = null;
     }
-    this.cameraContainer = null;
-    this.videoContainer = null;
-    this.maskGraphics = null;
     this.blurFilter = null;
     this.shadowCanvas = null;
     this.shadowCtx = null;

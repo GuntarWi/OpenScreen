@@ -12,19 +12,21 @@ import { getAssetPath } from "@/lib/assetPath";
 import { Application, Container, Sprite, Graphics, BlurFilter, Texture, VideoSource } from "pixi.js";
 import {
   ZOOM_DEPTH_SCALES,
+  RECORDING_ASSET_ID,
+  DEFAULT_CURSOR_STYLE,
   type ZoomRegion,
   type ZoomFocus,
   type ZoomDepth,
   type TrimRegion,
   type AnnotationRegion,
-  type OverlayVideoAsset,
-  type OverlayVideoRegion,
+  type VideoAsset,
+  type VideoClip,
   type CursorTrack,
-  DEFAULT_CURSOR_STYLE,
   type CursorSmoothing,
   type End2EndParams,
   type EffectRegion,
   type ScreenOffset,
+  type SpeedRegion,
 } from "./types";
 import { extractPausePointsFromDisplayEvents, evaluatePositionOnCRByTime, sampleCRPath } from "./end2endSmoother";
 import { DEFAULT_FOCUS, SMOOTHING_FACTOR, MIN_DELTA } from "./videoPlayback/constants";
@@ -35,11 +37,21 @@ import { updateOverlayIndicator } from "./videoPlayback/overlayUtils";
 import { layoutVideoContent as layoutVideoContentUtil } from "./videoPlayback/layoutUtils";
 import { applyZoomTransform } from "./videoPlayback/zoomTransform";
 import { createVideoEventHandlers } from "./videoPlayback/videoEventHandlers";
-import { OverlayPixiRenderer } from "./videoPlayback/overlayPixiRenderer";
+import { ClipPixiRenderer } from "./videoPlayback/clipPixiRenderer";
 import { type AspectRatio, formatAspectRatioForCSS } from "@/utils/aspectRatioUtils";
 import { AnnotationContentView, AnnotationOverlay } from "./AnnotationOverlay";
-import { OverlayVideoItem } from "./OverlayVideoItem";
+import { ClipVideoItem } from "./ClipVideoItem";
 import { computeEffectState, DEFAULT_EFFECT_STATE, type CombinedEffectState } from "./videoPlayback/effectUtils";
+import { getPlaybackRateForSpeedRegions } from "./speedRegionUtils";
+import {
+  getClipTimelineDurationMs,
+  getSourceOffsetForTimelineOffsetMs,
+  getSpeedAtTimelineOffset,
+  getTimelineOffsetForSourceOffsetMs,
+} from "./clipSpeedUtils";
+import type { InteractionRect } from "@/utils/recordingInteractionLayout";
+import { resolveRecordingVisibleRect } from "@/utils/recordingInteractionLayout";
+import { computeClipLayout } from "@/utils/clipLayout";
 
 interface VideoPlaybackProps {
   videoPath: string;
@@ -71,12 +83,13 @@ interface VideoPlaybackProps {
   onSelectAnnotation?: (id: string | null) => void;
   onAnnotationPositionChange?: (id: string, position: { x: number; y: number }) => void;
   onAnnotationSizeChange?: (id: string, size: { width: number; height: number }) => void;
-  overlayAssets?: OverlayVideoAsset[];
-  overlayRegions?: OverlayVideoRegion[];
-  selectedOverlayId?: string | null;
-  onSelectOverlay?: (id: string | null) => void;
-  onOverlayPositionChange?: (id: string, position: { x: number; y: number }) => void;
-  onOverlaySizeChange?: (id: string, size: { width: number; height: number }) => void;
+  videoAssets?: VideoAsset[];
+  videoClips?: VideoClip[];
+  selectedClipId?: string | null;
+  onSelectClip?: (id: string | null) => void;
+  onClipPositionChange?: (id: string, position: { x: number; y: number }) => void;
+  onClipSizeChange?: (id: string, size: { width: number; height: number }) => void;
+  onClipRectChange?: (id: string, rect: InteractionRect) => void;
   cursorTrack?: CursorTrack | null;
   cursorEnabled?: boolean;
   cursorSmoothing?: CursorSmoothing;
@@ -87,6 +100,7 @@ interface VideoPlaybackProps {
   zoomFollowMode?: 'center' | 'anchor';
   zoomFollowDelayMs?: number;
   zoomFollowMinPaddingPx?: number;
+  speedRegions?: SpeedRegion[];
 }
 
 export interface VideoPlaybackRef {
@@ -95,9 +109,10 @@ export interface VideoPlaybackRef {
   videoSprite: Sprite | null;
   videoContainer: Container | null;
   containerRef: React.RefObject<HTMLDivElement>;
-  overlayContainerRef: React.RefObject<HTMLDivElement>;
+  clipContainerRef: React.RefObject<HTMLDivElement>;
   play: () => Promise<void>;
   pause: () => void;
+  seekToTimelineTime: (timeSeconds: number) => void;
 }
 
 function VideoPlayback(
@@ -131,12 +146,13 @@ function VideoPlayback(
     onSelectAnnotation,
     onAnnotationPositionChange,
     onAnnotationSizeChange,
-    overlayAssets = [],
-    overlayRegions = [],
-    selectedOverlayId,
-    onSelectOverlay,
-    onOverlayPositionChange,
-    onOverlaySizeChange,
+    videoAssets = [],
+    videoClips = [],
+    selectedClipId,
+    onSelectClip,
+    onClipPositionChange,
+    onClipSizeChange,
+    onClipRectChange,
     cursorTrack,
     cursorEnabled = true,
     cursorSmoothing = 'none',
@@ -147,6 +163,7 @@ function VideoPlayback(
   zoomFollowMode = 'center',
   zoomFollowDelayMs = 120,
   zoomFollowMinPaddingPx = 24,
+  speedRegions = [],
   }: VideoPlaybackProps,
   ref: React.Ref<VideoPlaybackRef>
 ) {
@@ -160,23 +177,25 @@ function VideoPlayback(
   const [pixiReady, setPixiReady] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const overlayRef = useRef<HTMLDivElement | null>(null);
-  const overlayVideoLayerRef = useRef<HTMLDivElement | null>(null);
+  const clipVideoLayerRef = useRef<HTMLDivElement | null>(null);
   const screenGroupRef = useRef<HTMLDivElement | null>(null);
   const midgroundRef = useRef<HTMLDivElement | null>(null);
   const focusIndicatorRef = useRef<HTMLDivElement | null>(null);
   const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cursorImageRef = useRef<HTMLImageElement | null>(null);
   const currentTimeRef = useRef(0);
-  const overlayEndMsRef = useRef(0);
+  const clipEndMsRef = useRef(0);
   const videoDurationMsRef = useRef(0);
-  const overlayRendererRef = useRef<OverlayPixiRenderer | null>(null);
-  const overlayRegionsRef = useRef<OverlayVideoRegion[]>([]);
-  const overlayAssetsRef = useRef<OverlayVideoAsset[]>([]);
-  const selectedOverlayIdRef = useRef<string | null>(null);
+  const clipRendererRef = useRef<ClipPixiRenderer | null>(null);
+  const videoClipsRef = useRef<VideoClip[]>([]);
+  const videoAssetsRef = useRef<VideoAsset[]>([]);
+  const selectedClipIdRef = useRef<string | null>(null);
   const extendedPlaybackRef = useRef(false);
   const extendedPlaybackRafRef = useRef<number | null>(null);
   const extendedPlaybackStartRef = useRef(0);
   const extendedPlaybackBaseMsRef = useRef(0);
+  const extendedSeekTargetRef = useRef<number | null>(null);
+  const gapSeekTargetRef = useRef<number | null>(null);
   const zoomRegionsRef = useRef<ZoomRegion[]>([]);
   const selectedZoomIdRef = useRef<string | null>(null);
   const effectRegionsRef = useRef<EffectRegion[]>([]);
@@ -207,24 +226,23 @@ function VideoPlayback(
   const lastTickTimeMsRef = useRef<number | null>(null);
   const seekSnapUntilRef = useRef(0);
   const overlayDebugStateRef = useRef<Map<string, boolean>>(new Map());
-  const overlayDebugLastTransformRef = useRef<string | null>(null);
 
   const CURSOR_TRAIL_MS = 500;
   const CURSOR_CLICK_MS = 280;
   const RAD_TO_DEG = 180 / Math.PI;
 
-  // DEBUG: Temporarily enabled by default for overlay position debugging
-  // Set window.__openscreen_debugOverlay = false to disable
+  // DEBUG: Temporarily enabled by default for clip position debugging
+  // Set window.__openscreen_debugClips = false to disable (legacy: __openscreen_debugOverlay)
   const isOverlayDebugEnabled = () => {
     if (typeof window === 'undefined') return false;
-    const raw = (window as any).__openscreen_debugOverlay;
+    const raw = (window as any).__openscreen_debugClips ?? (window as any).__openscreen_debugOverlay;
     // Default to enabled (true) unless explicitly set to false
     return raw !== false && raw !== 'off' && raw !== 0;
   };
 
   const getOverlayDebugMode = useCallback(() => {
     if (typeof window === 'undefined') return 'off';
-    const raw = (window as any).__openscreen_debugOverlay;
+    const raw = (window as any).__openscreen_debugClips ?? (window as any).__openscreen_debugOverlay;
     if (raw === false || raw === 'off' || raw === 0) return 'off';
     if (raw === 'verbose' || raw === 'full' || raw === 'trace') return 'verbose';
     // Default to 'basic' (enabled) for debugging
@@ -280,7 +298,7 @@ function VideoPlayback(
     if (mode === 'off') return;
     if (verboseOnly && mode !== 'verbose') return;
     // Always use console.log so logs are visible (console.debug is often filtered)
-    logOverlayDebugExpanded('[Overlay Debug][preview]', { kind, ...payload });
+    logOverlayDebugExpanded('[Clip Debug][preview]', { kind, ...payload });
   }, [getOverlayDebugMode, logOverlayDebugExpanded]);
 
   const cancelExtendedPlayback = useCallback(() => {
@@ -332,6 +350,30 @@ function VideoPlayback(
     extendedPlaybackRafRef.current = requestAnimationFrame(tick);
   }, [cancelExtendedPlayback, onPlayStateChange, onTimeUpdate, stopExtendedPlayback]);
 
+  const hasExtendedTimelineBeyondSource = useCallback(() => {
+    const clipEndMs = clipEndMsRef.current;
+    const video = videoRef.current;
+    const videoDurationMs = videoDurationMsRef.current || Math.round((video?.duration ?? 0) * 1000);
+    return clipEndMs > videoDurationMs;
+  }, []);
+
+  const shouldIgnoreNativePauseForExtendedPlayback = useCallback(() => {
+    if (extendedPlaybackRef.current) {
+      return true;
+    }
+
+    if (!allowPlaybackRef.current || !hasExtendedTimelineBeyondSource()) {
+      return false;
+    }
+
+    const video = videoRef.current;
+    if (!video) return false;
+
+    const videoDurationMs = videoDurationMsRef.current || Math.round(video.duration * 1000);
+    const currentSourceMs = video.currentTime * 1000;
+    return currentSourceMs >= Math.max(0, videoDurationMs - 50);
+  }, [hasExtendedTimelineBeyondSource]);
+
   const applyEffectTransform = useCallback((state: CombinedEffectState) => {
     const group = screenGroupRef.current;
     if (!group) return;
@@ -373,11 +415,9 @@ function VideoPlayback(
     }
   }, [RAD_TO_DEG]);
 
-  const applyZoomToOverlays = useCallback((zoomScale: number, focusX: number, focusY: number) => {
-    const overlayLayer = overlayVideoLayerRef.current;
+  const applyZoomToOverlays = useCallback(() => {
+    const overlayLayer = clipVideoLayerRef.current;
     const annotationLayer = overlayRef.current;
-    const screenOffsetPx = screenOffsetPxRef.current;
-    const hasScreenOffset = Boolean(screenOffsetPx.x || screenOffsetPx.y);
 
     const resetTransform = (layer: HTMLDivElement | null) => {
       if (!layer) return;
@@ -385,64 +425,9 @@ function VideoPlayback(
       layer.style.transformOrigin = '';
     };
 
-    if (zoomScale === 1 && focusX === 0.5 && focusY === 0.5) {
-      // No zoom - reset transform
-      resetTransform(overlayLayer);
-      if (annotationLayer) {
-        if (hasScreenOffset) {
-          annotationLayer.style.transformOrigin = '0 0';
-          annotationLayer.style.transform = `translate3d(${screenOffsetPx.x}px, ${screenOffsetPx.y}px, 0)`;
-        } else {
-          resetTransform(annotationLayer);
-        }
-      }
-      if (isOverlayDebugEnabled() && overlayDebugLastTransformRef.current !== 'none') {
-        overlayDebugLastTransformRef.current = 'none';
-        logOverlayDebug('zoom-reset', { zoomScale, focusX, focusY });
-      }
-      return;
-    }
-
-    const applyLayerTransform = (layer: HTMLDivElement | null, offsetPx?: { x: number; y: number }) => {
-      if (!layer) return;
-
-      const stageSize = stageSizeRef.current;
-      const width = layer.clientWidth || stageSize.width;
-      const height = layer.clientHeight || stageSize.height;
-      if (!width || !height) return;
-
-      const focusStagePxX = focusX * width;
-      const focusStagePxY = focusY * height;
-      const stageCenterX = width / 2;
-      const stageCenterY = height / 2;
-      const offsetX = offsetPx?.x ?? 0;
-      const offsetY = offsetPx?.y ?? 0;
-      const offsetTransform = offsetX || offsetY
-        ? `translate3d(${offsetX}px, ${offsetY}px, 0) `
-        : '';
-
-      // Match the Pixi camera transform: translate to center, scale, translate focus to origin.
-      const transform = `${offsetTransform}translate3d(${stageCenterX}px, ${stageCenterY}px, 0) scale3d(${zoomScale}, ${zoomScale}, 1) translate3d(${-focusStagePxX}px, ${-focusStagePxY}px, 0)`;
-      layer.style.transformOrigin = '0 0';
-      layer.style.transform = transform;
-      layer.style.transformStyle = 'preserve-3d';
-      layer.style.backfaceVisibility = 'hidden';
-
-      if (isOverlayDebugEnabled() && overlayDebugLastTransformRef.current !== transform) {
-        overlayDebugLastTransformRef.current = transform;
-        logOverlayDebug('zoom-transform', {
-          zoomScale,
-          focusX,
-          focusY,
-          stageWidth: width,
-          stageHeight: height,
-        });
-      }
-    };
-
-    applyLayerTransform(overlayLayer);
-    applyLayerTransform(annotationLayer, screenOffsetPx);
-  }, [logOverlayDebug]);
+    resetTransform(overlayLayer);
+    resetTransform(annotationLayer);
+  }, []);
 
   // Load default cursor SVG image
   useEffect(() => {
@@ -614,32 +599,24 @@ function VideoPlayback(
   }, [screenOffset]);
 
   const applyScreenOffsetToVideo = useCallback(() => {
-    const videoStage = videoContainerRef.current;
-    if (!videoStage) return;
-
+    const renderer = clipRendererRef.current;
+    if (!renderer) return;
     const zoomScale = animationStateRef.current.scale || 1;
-    const offset = screenOffsetPxRef.current;
-    const base = videoContainerBaseRef.current;
-    const localX = zoomScale !== 0 ? offset.x / zoomScale : 0;
-    const localY = zoomScale !== 0 ? offset.y / zoomScale : 0;
-
-    videoStage.position.set(base.x + localX, base.y + localY);
+    renderer.applyScreenOffset(zoomScale);
   }, []);
 
   const applyScreenOffsetToMidground = useCallback(() => {
     const midground = midgroundRef.current;
     if (!midground) return;
 
-    const offset = screenOffsetPxRef.current;
-    if (offset.x || offset.y) {
-      midground.style.transform = `translate3d(${offset.x}px, ${offset.y}px, 0)`;
-      midground.style.transformOrigin = '0 0';
-      return;
-    }
-
     midground.style.transform = '';
     midground.style.transformOrigin = '';
   }, []);
+
+  const isRecordingClip = useCallback(
+    (clip: VideoClip) => clip.applyCamera || clip.assetId === RECORDING_ASSET_ID,
+    [],
+  );
 
   // Helper: compute stage pixel coords (pre-camera transform) from normalized video coords (nx, ny)
   const getStageCoordsFromNormalized = useCallback((nx: number, ny: number) => {
@@ -757,10 +734,16 @@ function VideoPlayback(
 
       updateOverlayForRegion(activeRegion);
 
-      const overlayRenderer = overlayRendererRef.current;
-      if (overlayRenderer) {
-        overlayRenderer.setStageSize(result.stageSize);
-        overlayRenderer.syncRegions(overlayRegionsRef.current);
+      const clipRenderer = clipRendererRef.current;
+      if (clipRenderer) {
+        clipRenderer.setStageSize(result.stageSize);
+        clipRenderer.syncClips(videoClipsRef.current);
+        clipRenderer.setRecordingLayout({
+          cropRegion: cropRegion ?? { x: 0, y: 0, width: 1, height: 1 },
+          padding: padding ?? 0,
+          borderRadius: borderRadius ?? 0,
+          screenOffsetPx: screenOffsetPxRef.current,
+        });
       }
     }
   }, [updateOverlayForRegion, cropRegion, borderRadius, padding, updateScreenOffsetRefs, applyScreenOffsetToVideo, applyScreenOffsetToMidground]);
@@ -774,18 +757,99 @@ function VideoPlayback(
     return zoomRegions.find((region) => region.id === selectedZoomId) ?? null;
   }, [zoomRegions, selectedZoomId]);
 
+  const recordingClips = useMemo(
+    () => [...videoClips].filter(isRecordingClip).sort((a, b) => a.startMs - b.startMs),
+    [videoClips, isRecordingClip],
+  );
+
+  const findRecordingClipAtTimelineMs = useCallback(
+    (timelineMs: number) => (
+      recordingClips.find((candidate) => timelineMs >= candidate.startMs && timelineMs <= candidate.endMs) ?? null
+    ),
+    [recordingClips],
+  );
+
+  const mapTimelineToRecordingSourceMs = useCallback((timelineMs: number) => {
+    const activeClip = findRecordingClipAtTimelineMs(timelineMs);
+    if (activeClip) {
+      const sourceStartMs = activeClip.sourceStartMs ?? 0;
+      const sourceDurationMs = Math.max(0, (activeClip.sourceEndMs ?? sourceStartMs + (activeClip.endMs - activeClip.startMs)) - sourceStartMs);
+      if (sourceDurationMs <= 0) return sourceStartMs;
+
+      const localTimelineMs = Math.max(0, Math.min(timelineMs - activeClip.startMs, getClipTimelineDurationMs(activeClip)));
+      return sourceStartMs + getSourceOffsetForTimelineOffsetMs(activeClip, localTimelineMs);
+    }
+
+    let previousClip: VideoClip | null = null;
+    let nextClip: VideoClip | null = null;
+
+    for (const candidate of recordingClips) {
+      if (candidate.endMs < timelineMs) {
+        previousClip = candidate;
+        continue;
+      }
+      if (candidate.startMs > timelineMs) {
+        nextClip = candidate;
+        break;
+      }
+    }
+
+    if (previousClip) {
+      const sourceStartMs = previousClip.sourceStartMs ?? 0;
+      const sourceEndMs = previousClip.sourceEndMs ?? sourceStartMs + (previousClip.endMs - previousClip.startMs);
+      return Math.max(sourceStartMs, sourceEndMs);
+    }
+
+    if (nextClip) {
+      return nextClip.sourceStartMs ?? 0;
+    }
+
+    return timelineMs;
+  }, [findRecordingClipAtTimelineMs, recordingClips]);
+
+  const mapRecordingSourceToTimelineMs = useCallback((sourceMs: number) => {
+    const clip = recordingClips.find((candidate) => {
+      const sourceStartMs = candidate.sourceStartMs ?? 0;
+      const sourceEndMs = candidate.sourceEndMs ?? sourceStartMs + (candidate.endMs - candidate.startMs);
+      return sourceMs >= sourceStartMs && sourceMs <= sourceEndMs;
+    }) ?? recordingClips[recordingClips.length - 1];
+
+    if (!clip) return sourceMs;
+
+    const sourceStartMs = clip.sourceStartMs ?? 0;
+    const sourceOffsetMs = Math.max(0, sourceMs - sourceStartMs);
+    return clip.startMs + getTimelineOffsetForSourceOffsetMs(clip, sourceOffsetMs);
+  }, [recordingClips]);
+
+  const getRecordingPlaybackRateForTimelineMs = useCallback((timelineMs: number) => {
+    const clip = recordingClips.find((candidate) => timelineMs >= candidate.startMs && timelineMs <= candidate.endMs);
+    const baseRate = clip
+      ? getSpeedAtTimelineOffset(clip, Math.max(0, timelineMs - clip.startMs))
+      : 1;
+    return getPlaybackRateForSpeedRegions(speedRegions, timelineMs, baseRate);
+  }, [recordingClips, speedRegions]);
+
   useImperativeHandle(ref, () => ({
     video: videoRef.current,
     app: appRef.current,
     videoSprite: videoSpriteRef.current,
     videoContainer: videoContainerRef.current,
     containerRef,
-    overlayContainerRef: overlayVideoLayerRef,
+    clipContainerRef: clipVideoLayerRef,
     play: async () => {
       const vid = videoRef.current;
       if (!vid) return;
       try {
         allowPlaybackRef.current = true;
+        const clipEndMs = clipEndMsRef.current;
+        const videoDurationMs = videoDurationMsRef.current || Math.round(vid.duration * 1000);
+        const currentTimelineMs = currentTimeRef.current;
+
+        if (clipEndMs > videoDurationMs && currentTimelineMs >= Math.max(0, videoDurationMs - 1)) {
+          startExtendedPlayback(Math.max(currentTimelineMs, videoDurationMs), clipEndMs);
+          return;
+        }
+
         await vid.play();
       } catch (error) {
         allowPlaybackRef.current = false;
@@ -804,7 +868,33 @@ function VideoPlayback(
       }
       video.pause();
     },
-  }));
+    seekToTimelineTime: (timeSeconds: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      const targetTimelineMs = Math.max(0, timeSeconds * 1000);
+      const videoDurationMs = videoDurationMsRef.current || Math.round(video.duration * 1000);
+      const targetRecordingClip = findRecordingClipAtTimelineMs(targetTimelineMs);
+      const isGapSeek = recordingClips.length > 0 && targetRecordingClip === null && targetTimelineMs <= videoDurationMs;
+      if (targetTimelineMs > videoDurationMs) {
+        gapSeekTargetRef.current = null;
+        extendedSeekTargetRef.current = targetTimelineMs;
+        currentTimeRef.current = targetTimelineMs;
+        onTimeUpdate(targetTimelineMs / 1000);
+        if (video.currentTime * 1000 < videoDurationMs - 100) {
+          video.currentTime = videoDurationMs / 1000;
+        }
+        return;
+      }
+      extendedSeekTargetRef.current = null;
+      gapSeekTargetRef.current = isGapSeek ? targetTimelineMs : null;
+      const targetSourceMs = mapTimelineToRecordingSourceMs(targetTimelineMs);
+      video.currentTime = targetSourceMs / 1000;
+      currentTimeRef.current = targetTimelineMs;
+      if (isGapSeek) {
+        onTimeUpdate(targetTimelineMs / 1000);
+      }
+    },
+  }), [containerRef, findRecordingClipAtTimelineMs, mapTimelineToRecordingSourceMs, onTimeUpdate, recordingClips.length, startExtendedPlayback, stopExtendedPlayback]);
 
   const updateFocusFromClientPoint = (clientX: number, clientY: number) => {
     const overlayEl = overlayRef.current;
@@ -891,31 +981,50 @@ function VideoPlayback(
   }, [selectedEffectId]);
 
   useEffect(() => {
-    overlayRegionsRef.current = overlayRegions;
-  }, [overlayRegions]);
+    videoClipsRef.current = videoClips;
+  }, [videoClips]);
 
   useEffect(() => {
-    overlayAssetsRef.current = overlayAssets;
-  }, [overlayAssets]);
+    videoAssetsRef.current = videoAssets;
+  }, [videoAssets]);
 
   useEffect(() => {
-    selectedOverlayIdRef.current = selectedOverlayId ?? null;
-  }, [selectedOverlayId]);
+    selectedClipIdRef.current = selectedClipId ?? null;
+  }, [selectedClipId]);
 
   useEffect(() => {
     updateScreenOffsetRefs();
     applyScreenOffsetToVideo();
     applyScreenOffsetToMidground();
-  }, [screenOffset, updateScreenOffsetRefs, applyScreenOffsetToVideo, applyScreenOffsetToMidground]);
+    const renderer = clipRendererRef.current;
+    if (renderer) {
+      renderer.setRecordingLayout({
+        cropRegion: cropRegion ?? { x: 0, y: 0, width: 1, height: 1 },
+        padding: padding ?? 0,
+        borderRadius: borderRadius ?? 0,
+        screenOffsetPx: screenOffsetPxRef.current,
+      });
+    }
+  }, [screenOffset, updateScreenOffsetRefs, applyScreenOffsetToVideo, applyScreenOffsetToMidground, cropRegion, padding, borderRadius]);
 
   useEffect(() => {
     if (!pixiReady || !videoReady) return;
-    const renderer = overlayRendererRef.current;
+    const renderer = clipRendererRef.current;
     if (!renderer) return;
-    renderer.setAssets(overlayAssets);
-    renderer.syncRegions(overlayRegions);
+    renderer.setAssets(videoAssets);
+    renderer.syncClips(videoClips);
     renderer.setStageSize(stageSizeRef.current);
-  }, [pixiReady, videoReady, overlayAssets, overlayRegions]);
+    const video = videoRef.current;
+    if (video) {
+      renderer.setExternalVideo(RECORDING_ASSET_ID, video, { allowSeek: false });
+    }
+    renderer.setRecordingLayout({
+      cropRegion: cropRegion ?? { x: 0, y: 0, width: 1, height: 1 },
+      padding: padding ?? 0,
+      borderRadius: borderRadius ?? 0,
+      screenOffsetPx: screenOffsetPxRef.current,
+    });
+  }, [pixiReady, videoReady, videoAssets, videoClips, cropRegion, padding, borderRadius]);
 
   // Follow anchor ref and keep props in refs for synchronous access in ticker
   const followAnchorRef = useRef<ZoomFocus | null>(null);
@@ -1064,6 +1173,11 @@ function VideoPlayback(
           isPlaying: isPlayingRef.current,
           motionBlurEnabled: motionBlurEnabledRef.current,
         });
+        clipRendererRef.current?.setCameraTransform({
+          scale: animationStateRef.current.scale,
+          focusX: animationStateRef.current.focusX,
+          focusY: animationStateRef.current.focusY,
+        });
         applyScreenOffsetToVideo();
       }
     } catch (err) {
@@ -1141,6 +1255,11 @@ function VideoPlayback(
         motionIntensity: 0,
         isPlaying: false,
         motionBlurEnabled: motionBlurEnabledRef.current,
+      });
+      clipRendererRef.current?.setCameraTransform({
+        scale: 1,
+        focusX: DEFAULT_FOCUS.cx,
+        focusY: DEFAULT_FOCUS.cy,
       });
       applyScreenOffsetToVideo();
 
@@ -1554,11 +1673,12 @@ function VideoPlayback(
       app.ticker.maxFPS = 60;
 
       if (!mounted) {
-        app.destroy(true, { children: true, texture: true, textureSource: true });
+        app.destroy({ removeView: true });
         return;
       }
 
       appRef.current = app;
+      app.stage.sortableChildren = true;
       container.appendChild(app.canvas);
 
       // Camera container - this will be scaled/positioned for zoom
@@ -1573,12 +1693,12 @@ function VideoPlayback(
       videoContainerRef.current = videoContainer;
       cameraContainer.addChild(videoContainer);
 
-      const overlayRenderer = new OverlayPixiRenderer(cameraContainer);
-      overlayRenderer.setZIndex(1);
-      overlayRenderer.setAssets(overlayAssetsRef.current);
-      overlayRenderer.syncRegions(overlayRegionsRef.current);
-      overlayRenderer.setStageSize(stageSizeRef.current);
-      overlayRendererRef.current = overlayRenderer;
+      const clipRenderer = new ClipPixiRenderer(app.stage);
+      clipRenderer.setZIndex(1);
+      clipRenderer.setAssets(videoAssetsRef.current);
+      clipRenderer.syncClips(videoClipsRef.current);
+      clipRenderer.setStageSize(stageSizeRef.current);
+      clipRendererRef.current = clipRenderer;
       
       setPixiReady(true);
     })();
@@ -1586,12 +1706,12 @@ function VideoPlayback(
     return () => {
       mounted = false;
       setPixiReady(false);
-      if (overlayRendererRef.current) {
-        overlayRendererRef.current.destroy();
-        overlayRendererRef.current = null;
+      if (clipRendererRef.current) {
+        clipRendererRef.current.destroy();
+        clipRendererRef.current = null;
       }
       if (app && app.renderer) {
-        app.destroy(true, { children: true, texture: true, textureSource: true });
+        app.destroy({ removeView: true });
       }
       appRef.current = null;
       cameraContainerRef.current = null;
@@ -1626,13 +1746,8 @@ function VideoPlayback(
     if (!video || !app || !videoContainer) return;
     if (video.videoWidth === 0 || video.videoHeight === 0) return;
     
-    const source = VideoSource.from(video);
-    if ('autoPlay' in source) {
-      (source as { autoPlay?: boolean }).autoPlay = false;
-    }
-    if ('autoUpdate' in source) {
-      (source as { autoUpdate?: boolean }).autoUpdate = true;
-    }
+    const source = new VideoSource({ resource: video, autoPlay: false, autoLoad: false });
+    source.load().catch(() => {});
     const videoTexture = Texture.from(source);
     
     const videoSprite = new Sprite(videoTexture);
@@ -1643,6 +1758,7 @@ function VideoPlayback(
     videoContainer.addChild(maskGraphics);
     videoContainer.mask = maskGraphics;
     maskGraphicsRef.current = maskGraphics;
+    videoContainer.visible = false;
 
     animationStateRef.current = {
       scale: 1,
@@ -1678,30 +1794,56 @@ function VideoPlayback(
       onSeekActivity: () => {
         seekSnapUntilRef.current = performance.now() + 200;
       },
+      mapSourceToTimelineMs: mapRecordingSourceToTimelineMs,
+      mapTimelineToSourceMs: mapTimelineToRecordingSourceMs,
+      getPlaybackRateForTimelineMs: getRecordingPlaybackRateForTimelineMs,
     });
 
     const handlePause = () => {
+      const pinnedTimelineMs = extendedSeekTargetRef.current ?? gapSeekTargetRef.current;
+      if (shouldIgnoreNativePauseForExtendedPlayback()) {
+        return;
+      }
       cancelExtendedPlayback();
       handlePauseBase();
+      if (pinnedTimelineMs !== null) {
+        currentTimeRef.current = pinnedTimelineMs;
+        onTimeUpdate(pinnedTimelineMs / 1000);
+      }
     };
 
     const handleSeeked = () => {
+      const pinnedTimelineMs = extendedSeekTargetRef.current ?? gapSeekTargetRef.current;
+      if (pinnedTimelineMs !== null) {
+        cancelExtendedPlayback();
+        currentTimeRef.current = pinnedTimelineMs;
+        onTimeUpdate(pinnedTimelineMs / 1000);
+        return;
+      }
       cancelExtendedPlayback();
       handleSeekedBase();
     };
 
     const handleSeeking = () => {
+      const pinnedTimelineMs = extendedSeekTargetRef.current ?? gapSeekTargetRef.current;
+      if (pinnedTimelineMs !== null) {
+        cancelExtendedPlayback();
+        currentTimeRef.current = pinnedTimelineMs;
+        onTimeUpdate(pinnedTimelineMs / 1000);
+        return;
+      }
       cancelExtendedPlayback();
       handleSeekingBase();
     };
 
     const handleEnded = () => {
-      const overlayEndMs = overlayEndMsRef.current;
+      const clipEndMs = clipEndMsRef.current;
       const videoDurationMs = videoDurationMsRef.current || Math.round(video.duration * 1000);
-      const shouldExtend = overlayEndMs > videoDurationMs;
+      const shouldExtend = clipEndMs > videoDurationMs;
 
       if (shouldExtend && isPlayingRef.current) {
-        startExtendedPlayback(videoDurationMs, overlayEndMs);
+        const startMs = currentTimeRef.current > videoDurationMs ? currentTimeRef.current : videoDurationMs;
+        startExtendedPlayback(startMs, clipEndMs);
         return;
       }
 
@@ -1745,7 +1887,7 @@ function VideoPlayback(
       
       videoSpriteRef.current = null;
     };
-  }, [pixiReady, videoReady, onTimeUpdate, onPlayStateChange, updateOverlayForRegion, cancelExtendedPlayback, startExtendedPlayback]);
+  }, [pixiReady, videoReady, onTimeUpdate, onPlayStateChange, updateOverlayForRegion, cancelExtendedPlayback, startExtendedPlayback, shouldIgnoreNativePauseForExtendedPlayback]);
 
   useEffect(() => {
     if (!pixiReady || !videoReady) return;
@@ -1773,6 +1915,23 @@ function VideoPlayback(
         isPlaying: isPlayingRef.current,
         motionBlurEnabled: motionBlurEnabledRef.current,
       });
+
+      const renderer = clipRendererRef.current;
+      if (renderer) {
+        renderer.setCameraTransform({
+          scale: state.scale,
+          focusX: state.focusX,
+          focusY: state.focusY,
+        });
+        const recordingClip = videoClipsRef.current.find(isRecordingClip);
+        const blurFilter = blurFilterRef.current;
+        if (recordingClip && blurFilter) {
+          const item = renderer.getClipItem(recordingClip.id);
+          if (item && item.content.filters?.[0] !== blurFilter) {
+            item.content.filters = [blurFilter];
+          }
+        }
+      }
     };
 
     let tickerLogThrottle = 0;
@@ -1780,7 +1939,7 @@ function VideoPlayback(
 
     const ticker = () => {
       const timeMs = currentTimeRef.current;
-      overlayRendererRef.current?.update(timeMs, isPlayingRef.current, selectedOverlayIdRef.current);
+      clipRendererRef.current?.update(timeMs, isPlayingRef.current, selectedClipIdRef.current);
       const lastTimeMs = lastTickTimeMsRef.current;
       const hasTimeJump = lastTimeMs !== null && Math.abs(timeMs - lastTimeMs) > 200;
       const nowPerf = performance.now();
@@ -1978,13 +2137,13 @@ function VideoPlayback(
         (window as any).__lastTickerLogTime = roundedTimeMs;
         
         // Get overlay layer and positions
-        const overlayLayer = overlayVideoLayerRef.current;
+        const overlayLayer = clipVideoLayerRef.current;
         const stageW = overlayLayer?.clientWidth || 0;
         const stageH = overlayLayer?.clientHeight || 0;
-        const overlayEls = overlayLayer?.querySelectorAll('[data-overlay-id]') || [];
+        const overlayEls = overlayLayer?.querySelectorAll('[data-clip-id]') || [];
         const overlayPositions: Record<string, { cssLeft: number; cssTop: number; domLeft: number; domTop: number }> = {};
         overlayEls.forEach((el) => {
-          const id = el.getAttribute('data-overlay-id');
+          const id = el.getAttribute('data-clip-id');
           if (id) {
             const htmlEl = el as HTMLElement;
             const rect = el.getBoundingClientRect();
@@ -1998,7 +2157,7 @@ function VideoPlayback(
           }
         });
         
-        logOverlayDebugExpanded('[Overlay Debug][ticker]', {
+        logOverlayDebugExpanded('[Clip Debug][ticker]', {
           timeMs: roundedTimeMs,
           hasTimeJump,
           hasZoomChange,
@@ -2022,7 +2181,7 @@ function VideoPlayback(
         applyTransform(0);
         applyScreenOffsetToVideo();
         applyEffectTransform(effectState);
-        applyZoomToOverlays(state.scale, state.focusX, state.focusY);
+        applyZoomToOverlays();
         lastTickTimeMsRef.current = timeMs;
         return;
       }
@@ -2070,7 +2229,7 @@ function VideoPlayback(
       applyTransform(motionIntensity);
       applyScreenOffsetToVideo();
       applyEffectTransform(effectState);
-      applyZoomToOverlays(state.scale, state.focusX, state.focusY);
+      applyZoomToOverlays();
       lastTickTimeMsRef.current = timeMs;
     };
 
@@ -2081,6 +2240,16 @@ function VideoPlayback(
       }
     };
   }, [pixiReady, videoReady, clampFocusToStage, applyEffectTransform, applyZoomToOverlays, applyScreenOffsetToVideo, logOverlayDebugExpanded]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const currentMs = currentTime * 1000;
+    const targetRate = getRecordingPlaybackRateForTimelineMs(currentMs);
+    if (video.playbackRate !== targetRate) {
+      video.playbackRate = targetRate;
+    }
+  }, [currentTime, getRecordingPlaybackRateForTimelineMs]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     const video = e.currentTarget;
@@ -2169,23 +2338,37 @@ function VideoPlayback(
     : { background: resolvedWallpaper || '' };
 
   const timeMs = Math.round(currentTime * 1000);
-  const overlayAssetMap = useMemo(
-    () => new Map(overlayAssets.map((asset) => [asset.id, asset])),
-    [overlayAssets],
+  const videoAssetMap = useMemo(
+    () => new Map(videoAssets.map((asset) => [asset.id, asset])),
+    [videoAssets],
   );
   useEffect(() => {
     currentTimeRef.current = currentTime * 1000;
   }, [currentTime]);
 
   useEffect(() => {
-    overlayEndMsRef.current = overlayRegions.reduce((max, region) => Math.max(max, region.endMs), 0);
-  }, [overlayRegions]);
+    const pinnedGapMs = gapSeekTargetRef.current;
+    if (pinnedGapMs === null) {
+      return;
+    }
+
+    const currentTimelineMs = Math.round(currentTime * 1000);
+    if (Math.abs(currentTimelineMs - pinnedGapMs) <= 1) {
+      return;
+    }
+
+    gapSeekTargetRef.current = null;
+  }, [currentTime]);
+
+  useEffect(() => {
+    clipEndMsRef.current = videoClips.reduce((max, region) => Math.max(max, region.endMs), 0);
+  }, [videoClips]);
 
   // Debug: Log overlay region enter/exit events
   useEffect(() => {
     if (!isOverlayDebugEnabled()) return;
     const next = new Map<string, boolean>();
-    for (const region of overlayRegions) {
+    for (const region of videoClips) {
       const active = timeMs >= region.startMs && timeMs <= region.endMs;
       next.set(region.id, active);
       const prev = overlayDebugStateRef.current.get(region.id) ?? false;
@@ -2202,7 +2385,7 @@ function VideoPlayback(
       }
     }
     overlayDebugStateRef.current = next;
-  }, [logOverlayDebug, overlayRegions, timeMs]);
+  }, [logOverlayDebug, videoClips, timeMs]);
 
   // Debug: Log only when timeline position changes significantly
   const lastDebugTimeMsRef = useRef<number | null>(null);
@@ -2215,12 +2398,12 @@ function VideoPlayback(
     if (lastTime !== null && Math.abs(timeMs - lastTime) < 1) return;
     lastDebugTimeMsRef.current = timeMs;
 
-    const overlayLayer = overlayVideoLayerRef.current;
+    const overlayLayer = clipVideoLayerRef.current;
     const stageWidth = overlayLayer?.clientWidth || 0;
     const stageHeight = overlayLayer?.clientHeight || 0;
 
     // Get actual DOM positions of overlay elements with detailed transform info
-    const overlayElements = overlayLayer?.querySelectorAll('[data-overlay-id]') || [];
+    const overlayElements = overlayLayer?.querySelectorAll('[data-clip-id]') || [];
     const domPositions: Record<string, { 
       relLeft: number; relTop: number; width: number; height: number;
       transform: string; computedTransform: string;
@@ -2229,7 +2412,7 @@ function VideoPlayback(
     }> = {};
     const layerRect = overlayLayer?.getBoundingClientRect();
     overlayElements.forEach((el) => {
-      const id = el.getAttribute('data-overlay-id');
+      const id = el.getAttribute('data-clip-id');
       if (id) {
         const htmlEl = el as HTMLElement;
         const rect = el.getBoundingClientRect();
@@ -2247,7 +2430,7 @@ function VideoPlayback(
       }
     });
 
-    const activeOverlays = overlayRegions
+    const activeOverlays = videoClips
       .filter((region) => timeMs >= region.startMs && timeMs <= region.endMs)
       .map((region) => {
         const expectedX = (region.position.x / 100) * stageWidth;
@@ -2272,7 +2455,7 @@ function VideoPlayback(
     const { region: dominantZoom, strength } = findDominantRegion(zoomRegions, timeMs);
     const effectState = effectStateRef.current;
 
-    logOverlayDebugExpanded('[Overlay Debug][scrub]', {
+    logOverlayDebugExpanded('[Clip Debug][scrub]', {
       timeMs,
       stage: { width: stageWidth, height: stageHeight },
       zoom: {
@@ -2296,7 +2479,7 @@ function VideoPlayback(
       overlayTransform: overlayLayer?.style.transform || 'none',
       activeOverlays,
     });
-  }, [getOverlayDebugMode, overlayRegions, timeMs, zoomRegions, logOverlayDebugExpanded]);
+  }, [getOverlayDebugMode, videoClips, timeMs, zoomRegions, logOverlayDebugExpanded]);
 
   const getActiveAnnotations = (layer?: 'foreground' | 'midground') => {
     const filtered = (annotationRegions || []).filter((annotation) => {
@@ -2311,12 +2494,12 @@ function VideoPlayback(
     return [...filtered].sort((a, b) => a.zIndex - b.zIndex);
   };
 
-  const activeOverlayRegions = useMemo(() => {
-    if (!overlayRegions.length) return [];
-    return overlayRegions
-      .filter((region) => timeMs >= region.startMs && timeMs <= region.endMs)
+  const activeClipRegions = useMemo(() => {
+    if (!videoClips.length) return [];
+    return videoClips
+      .filter((clip) => timeMs >= clip.startMs && timeMs <= clip.endMs)
       .sort((a, b) => a.zIndex - b.zIndex);
-  }, [overlayRegions, timeMs]);
+  }, [videoClips, timeMs]);
 
   const shadowFilter = (showShadow && shadowIntensity > 0)
     ? `drop-shadow(0 ${shadowIntensity * 12}px ${shadowIntensity * 48}px rgba(0,0,0,${shadowIntensity * 0.7})) drop-shadow(0 ${shadowIntensity * 4}px ${shadowIntensity * 16}px rgba(0,0,0,${shadowIntensity * 0.5})) drop-shadow(0 ${shadowIntensity * 2}px ${shadowIntensity * 8}px rgba(0,0,0,${shadowIntensity * 0.3}))`
@@ -2402,23 +2585,23 @@ function VideoPlayback(
 
           {pixiReady && videoReady && (
             <div
-              ref={overlayVideoLayerRef}
+              ref={clipVideoLayerRef}
               className="absolute inset-0 select-none"
-              style={{ zIndex: 8, pointerEvents: selectedOverlayId && !isPlaying ? 'auto' : 'none', transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
+              style={{ zIndex: 8, pointerEvents: selectedClipId && !isPlaying ? 'auto' : 'none', transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
             >
               {(() => {
-                if (!activeOverlayRegions.length) return null;
+                if (!activeClipRegions.length) return null;
                 // Use stageSizeRef as the authoritative source for dimensions
                 // This avoids issues when DOM elements have transforms or are in transitional states
                 const stageSize = stageSizeRef.current;
-                const containerWidth = stageSize.width || overlayVideoLayerRef.current?.clientWidth || 800;
-                const containerHeight = stageSize.height || overlayVideoLayerRef.current?.clientHeight || 600;
+                const containerWidth = stageSize.width || clipVideoLayerRef.current?.clientWidth || 800;
+                const containerHeight = stageSize.height || clipVideoLayerRef.current?.clientHeight || 600;
                 
                 // Debug: Log containerWidth and parent transforms when rendering overlays
                 if (isOverlayDebugEnabled()) {
-                  const layerEl = overlayVideoLayerRef.current;
+                  const layerEl = clipVideoLayerRef.current;
                   const screenGroup = screenGroupRef.current;
-                  logOverlayDebugExpanded('[Overlay Debug][render]', {
+                  logOverlayDebugExpanded('[Clip Debug][render]', {
                     containerWidth,
                     containerHeight,
                     stageSizeWidth: stageSize.width,
@@ -2444,23 +2627,63 @@ function VideoPlayback(
                 }
                 
                 // Get current overlay layer transform to pass to children
-                const parentTransform = overlayVideoLayerRef.current?.style.transform || 'none';
+                const parentTransform = clipVideoLayerRef.current?.style.transform || 'none';
                 
-                return activeOverlayRegions.map((region) => {
-                  if (!overlayAssetMap.has(region.assetId)) return null;
+                return activeClipRegions.map((region) => {
+                  if (!videoAssetMap.has(region.assetId)) return null;
+                  let interactionRect = clipRendererRef.current?.getClipInteractionRect(region.id) ?? null;
+                  if (!interactionRect) {
+                    if (isRecordingClip(region)) {
+                      const video = videoRef.current;
+                      if (video) {
+                        interactionRect = resolveRecordingVisibleRect({
+                          stageWidth: containerWidth,
+                          stageHeight: containerHeight,
+                          sourceWidth: video.videoWidth,
+                          sourceHeight: video.videoHeight,
+                          cropRegion: cropRegion ?? { x: 0, y: 0, width: 1, height: 1 },
+                          padding: padding ?? 0,
+                          screenOffset,
+                        });
+                      }
+                    } else {
+                      const asset = videoAssetMap.get(region.assetId);
+                      const videoWidth = asset?.width ?? 0;
+                      const videoHeight = asset?.height ?? 0;
+                      const layout = computeClipLayout({
+                        region,
+                        containerWidth,
+                        containerHeight,
+                        videoWidth,
+                        videoHeight,
+                      });
+                      if (layout) {
+                        const anchor = region.anchor ?? { x: 0, y: 0 };
+                        const scale = Math.max(0.01, region.scale ?? 1);
+                        interactionRect = {
+                          x: layout.dest.x + layout.dest.width * anchor.x * (1 - scale),
+                          y: layout.dest.y + layout.dest.height * anchor.y * (1 - scale),
+                          width: layout.dest.width * scale,
+                          height: layout.dest.height * scale,
+                        };
+                      }
+                    }
+                  }
                   return (
-                    <OverlayVideoItem
+                    <ClipVideoItem
                       key={region.id}
                       region={region}
                       containerWidth={containerWidth}
                       containerHeight={containerHeight}
+                      interactionRect={interactionRect}
                       currentTimeMs={timeMs}
                       isPlaying={isPlaying}
-                      isSelected={region.id === selectedOverlayId}
+                      isSelected={region.id === selectedClipId}
                       parentTransform={parentTransform}
-                      onSelect={(id) => onSelectOverlay?.(id)}
-                      onPositionChange={(id, position) => onOverlayPositionChange?.(id, position)}
-                      onSizeChange={(id, size) => onOverlaySizeChange?.(id, size)}
+                      onSelect={(id) => onSelectClip?.(id)}
+                      onPositionChange={(id, position) => onClipPositionChange?.(id, position)}
+                      onSizeChange={(id, size) => onClipSizeChange?.(id, size)}
+                      onRectChange={(id, rect) => onClipRectChange?.(id, rect)}
                     />
                   );
                 });

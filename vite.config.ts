@@ -3,6 +3,7 @@ import path from 'node:path'
 import electron from 'vite-plugin-electron/simple'
 import react from '@vitejs/plugin-react'
 
+const ELECTRON_MAIN_ENTRY = path.join(__dirname, 'dist-electron/main.js')
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -12,6 +13,9 @@ export default defineConfig({
       main: {
         // Shortcut of `build.lib.entry`.
         entry: 'electron/main.ts',
+        onstart: async ({ startup }) => {
+          await startup([ELECTRON_MAIN_ENTRY, '--no-sandbox'])
+        },
         vite: {
           build: {
 

@@ -76,6 +76,32 @@
     will-change: transform;
     transition: left 33ms linear, right 33ms linear;
   }
+
+  .custom-scrollbar {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.28) rgba(255, 255, 255, 0.03);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.28);
+    border-radius: 9999px;
+    border: 2px solid rgba(9, 9, 11, 0.95);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover,
+  .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background: rgba(148, 163, 184, 0.28);
+  }
   
   /* Smooth playback scrubber */
   input[type="range"] {

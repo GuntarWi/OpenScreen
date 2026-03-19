@@ -24,6 +24,7 @@ export interface ZoomFollowSettings {
 
 export interface ZoomRegion {
   id: string;
+  trackId?: string;
   startMs: number;
   endMs: number;
   depth: ZoomDepth;
@@ -32,6 +33,7 @@ export interface ZoomRegion {
 
 export interface TrimRegion {
   id: string;
+  trackId?: string;
   startMs: number;
   endMs: number;
 }
@@ -78,6 +80,7 @@ export interface AnnotationTextStyle {
 
 export interface AnnotationRegion {
   id: string;
+  trackId?: string;
   startMs: number;
   endMs: number;
   type: AnnotationType;
@@ -98,56 +101,94 @@ export interface AnnotationRegion {
   exitEffect?: AnnotationEnterExitEffect;
 }
 
-export interface OverlayVideoAsset {
+export interface VideoAsset {
   id: string;
   name: string;
   src: string;
   durationMs: number;
   width: number;
   height: number;
+  kind?: 'recording' | 'video' | 'audio' | 'image';
 }
 
-export type OverlayVideoFit = 'contain' | 'cover';
+export const RECORDING_ASSET_ID = 'recording';
 
-export interface OverlayVideoCrop {
+export type VideoClipFit = 'contain' | 'cover';
+
+export interface VideoClipCrop {
   x: number;      // crop start x as percentage (0-100)
   y: number;      // crop start y as percentage (0-100)
   width: number;  // crop width as percentage (0-100)
   height: number; // crop height as percentage (0-100)
 }
 
-export interface OverlayChromaKey {
+export interface VideoClipChromaKey {
   enabled: boolean;
   color?: string; // hex color, e.g. #00ff00
   threshold?: number; // 0-1
   softness?: number; // 0-1
 }
 
-export const DEFAULT_OVERLAY_CROP: OverlayVideoCrop = {
+export const DEFAULT_CLIP_CROP: VideoClipCrop = {
   x: 0,
   y: 0,
   width: 100,
   height: 100,
 };
 
-export type OverlayEffect = 'none' | 'fade' | 'pixel';
+export type VideoClipEffect =
+  | 'none'
+  | 'fade'
+  | 'pixel'
+  | 'slide-left'
+  | 'slide-right'
+  | 'slide-up'
+  | 'slide-down';
 
-export interface OverlayVideoRegion {
+export interface ClipSpeedPoint {
   id: string;
+  position: number; // normalized position within the clip source range (0-1)
+  speed: number;
+}
+
+export interface VideoClip {
+  id: string;
+  trackId?: string;
   assetId: string;
   startMs: number;
   endMs: number;
+  sourceStartMs?: number;
+  sourceEndMs?: number;
   position: AnnotationPosition;
   size: AnnotationSize;
   zIndex: number;
+  opacity?: number;
+  rotationDeg?: number;
+  scale?: number;
+  anchor?: { x: number; y: number };
   borderRadius?: number;
-  fit?: OverlayVideoFit;
-  crop?: OverlayVideoCrop;
-  chromaKey?: OverlayChromaKey;
-  enterEffect?: OverlayEffect;
-  exitEffect?: OverlayEffect;
+  fit?: VideoClipFit;
+  crop?: VideoClipCrop;
+  chromaKey?: VideoClipChromaKey;
+  enterEffect?: VideoClipEffect;
+  exitEffect?: VideoClipEffect;
   fadeInMs?: number;
   fadeOutMs?: number;
+  applyCamera?: boolean;
+  playbackRate?: number;
+  speedPoints?: ClipSpeedPoint[];
+}
+
+export interface AudioClip {
+  id: string;
+  trackId?: string;
+  assetId: string;
+  startMs: number;
+  endMs: number;
+  sourceStartMs?: number;
+  sourceEndMs?: number;
+  volume?: number;
+  muted?: boolean;
 }
 
 export const DEFAULT_ANNOTATION_POSITION: AnnotationPosition = {
@@ -189,12 +230,12 @@ export const DEFAULT_ANNOTATION_EFFECTS: {
   exitEffect: 'fade',
 };
 
-export const DEFAULT_OVERLAY_POSITION: AnnotationPosition = {
+export const DEFAULT_CLIP_POSITION: AnnotationPosition = {
   x: 65,
   y: 65,
 };
 
-export const DEFAULT_OVERLAY_SIZE: AnnotationSize = {
+export const DEFAULT_CLIP_SIZE: AnnotationSize = {
   width: 30,
   height: 30,
 };
@@ -203,6 +244,7 @@ export type EffectType = 'perspective' | 'shake';
 
 export interface EffectRegion {
   id: string;
+  trackId?: string;
   startMs: number;
   endMs: number;
   type: EffectType;
@@ -261,8 +303,68 @@ export interface End2EndParams {
 }
 
 export interface CursorTrack {
+  trackId?: string;
   events: CursorEvent[];
   style: CursorStyle;
+}
+
+export interface SpeedRegion {
+  id: string;
+  trackId?: string;
+  startMs: number;
+  endMs: number;
+  speed: number;
+}
+
+export const DEFAULT_SPEED_REGION: Omit<SpeedRegion, 'id' | 'startMs' | 'endMs'> = {
+  speed: 2,
+};
+
+export type TimelineTrackType =
+  | 'recording'
+  | 'generic'
+  | 'video'
+  | 'audio'
+  | 'zoom'
+  | 'trim'
+  | 'effect'
+  | 'annotation'
+  | 'cursor'
+  | 'speed';
+
+export type TimelineTrackItemType =
+  | 'mixed'
+  | 'videoClip'
+  | 'audioClip'
+  | 'zoom'
+  | 'trim'
+  | 'effect'
+  | 'annotation'
+  | 'cursor'
+  | 'speed';
+
+export type TimelineTrackTemplate =
+  | 'generic'
+  | 'video'
+  | 'audio'
+  | 'zoom'
+  | 'trim'
+  | 'annotation'
+  | 'speed'
+  | 'effect-perspective'
+  | 'effect-shake';
+
+export interface TimelineTrack {
+  id: string;
+  type: TimelineTrackType;
+  itemType: TimelineTrackItemType;
+  name: string;
+  order: number;
+  height: number;
+  locked?: boolean;
+  hidden?: boolean;
+  muted?: boolean;
+  collapsed?: boolean;
 }
 
 export const DEFAULT_CURSOR_STYLE: CursorStyle = {

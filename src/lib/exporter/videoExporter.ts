@@ -2,7 +2,7 @@ import type { ExportConfig, ExportProgress, ExportResult } from './types';
 import { VideoFileDecoder } from './videoDecoder';
 import { FrameRenderer } from './frameRenderer';
 import { VideoMuxer } from './muxer';
-import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion, EffectRegion, ScreenOffset, OverlayVideoAsset, OverlayVideoRegion, PaddingKeyframe } from '@/components/video-editor/types';
+import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe } from '@/components/video-editor/types';
 
 interface VideoExporterConfig extends ExportConfig {
   videoUrl: string;
@@ -20,8 +20,8 @@ interface VideoExporterConfig extends ExportConfig {
   cropRegion: CropRegion;
   screenOffset?: ScreenOffset;
   annotationRegions?: AnnotationRegion[];
-  overlayAssets?: OverlayVideoAsset[];
-  overlayRegions?: OverlayVideoRegion[];
+  videoAssets?: VideoAsset[];
+  videoClips?: VideoClip[];
   effectRegions?: EffectRegion[];
   previewWidth?: number;
   previewHeight?: number;
@@ -125,8 +125,8 @@ export class VideoExporter {
         videoWidth: videoInfo.width,
         videoHeight: videoInfo.height,
         annotationRegions: this.config.annotationRegions,
-        overlayAssets: this.config.overlayAssets,
-        overlayRegions: this.config.overlayRegions,
+        videoAssets: this.config.videoAssets,
+        videoClips: this.config.videoClips,
         effectRegions: this.config.effectRegions,
         previewWidth: this.config.previewWidth,
         previewHeight: this.config.previewHeight,
@@ -145,20 +145,21 @@ export class VideoExporter {
       if (!videoElement) {
         throw new Error('Video element not available');
       }
+      this.renderer?.setRecordingVideo(videoElement);
 
       // Calculate effective duration and frame count (excluding trim regions)
       const effectiveDuration = this.getEffectiveDuration(videoInfo.duration);
-      const overlayMaxEndMs = (this.config.overlayRegions || []).reduce(
-        (max, region) => Math.max(max, region.endMs),
+      const clipMaxEndMs = (this.config.videoClips || []).reduce(
+        (max, clip) => Math.max(max, clip.endMs),
         0,
       );
       const videoDurationMs = Math.max(0, Math.round(videoInfo.duration * 1000));
-      const overlayEffectiveEndMs = overlayMaxEndMs > 0
-        ? overlayMaxEndMs <= videoDurationMs
-          ? this.mapSourceToEffectiveTime(overlayMaxEndMs)
-          : (effectiveDuration * 1000) + (overlayMaxEndMs - videoDurationMs)
+      const clipEffectiveEndMs = clipMaxEndMs > 0
+        ? clipMaxEndMs <= videoDurationMs
+          ? this.mapSourceToEffectiveTime(clipMaxEndMs)
+          : (effectiveDuration * 1000) + (clipMaxEndMs - videoDurationMs)
         : 0;
-      const exportDuration = Math.max(effectiveDuration, overlayEffectiveEndMs / 1000);
+      const exportDuration = Math.max(effectiveDuration, clipEffectiveEndMs / 1000);
       const totalFrames = Math.ceil(exportDuration * this.config.frameRate);
       
       console.log('[VideoExporter] Original duration:', videoInfo.duration, 's');
@@ -210,16 +211,9 @@ export class VideoExporter {
           });
         }
 
-        // Create a VideoFrame from the video element (on GPU!)
-        const videoFrame = new VideoFrame(videoElement, {
-          timestamp,
-        });
-
         // Render the frame with all effects using source timestamp
         const renderTimestamp = renderTimeMs * 1000; // Convert to microseconds
-        await this.renderer!.renderFrame(videoFrame, renderTimestamp);
-        
-        videoFrame.close();
+        await this.renderer!.renderFrame(renderTimestamp);
 
         const canvas = this.renderer!.getCanvas();
 

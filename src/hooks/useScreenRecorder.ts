@@ -2,12 +2,40 @@ import { useState, useRef, useEffect } from "react";
 import { DEFAULT_CURSOR_STYLE, type CursorEvent, type CursorTrack } from "@/components/video-editor/types";
 import { fixWebmDuration } from "@fix-webm-duration/fix";
 
+type SavedRecording = {
+  path: string;
+  durationMs: number;
+  fileName: string;
+  cursorTrack: CursorTrack | null;
+};
+
+type DesktopCaptureConstraints = MediaTrackConstraints & {
+  mandatory: {
+    chromeMediaSource: string;
+    chromeMediaSourceId: string;
+    maxWidth: number;
+    maxHeight: number;
+    maxFrameRate: number;
+    minFrameRate: number;
+  };
+};
+
+type UseScreenRecorderOptions = {
+  onRecordingSaved?: (recording: SavedRecording) => Promise<void> | void;
+  setCurrentVideoPathOnSave?: boolean;
+  switchToEditorOnSave?: boolean;
+};
+
 type UseScreenRecorderReturn = {
   recording: boolean;
   toggleRecording: () => void;
 };
 
-export function useScreenRecorder(): UseScreenRecorderReturn {
+export function useScreenRecorder({
+  onRecordingSaved,
+  setCurrentVideoPathOnSave = true,
+  switchToEditorOnSave = true,
+}: UseScreenRecorderOptions = {}): UseScreenRecorderReturn {
   const [recording, setRecording] = useState(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -258,7 +286,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         return;
       }
 
-      const mediaStream = await (navigator.mediaDevices as any).getUserMedia({
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           mandatory: {
@@ -269,7 +297,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             maxFrameRate: TARGET_FRAME_RATE,
             minFrameRate: 30,
           },
-        },
+        } as DesktopCaptureConstraints,
       });
       stream.current = mediaStream;
       if (!stream.current) {
@@ -286,7 +314,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         console.warn("Unable to lock 4K/60fps constraints, using best available track settings.", error);
       }
 
-      let { width = 1920, height = 1080, frameRate = TARGET_FRAME_RATE } = videoTrack.getSettings();
+      let { width = 1920, height = 1080 } = videoTrack.getSettings();
+      const { frameRate = TARGET_FRAME_RATE } = videoTrack.getSettings();
       
       // Ensure dimensions are divisible by 2 for VP9/AV1 codec compatibility
       width = Math.floor(width / 2) * 2;
@@ -331,14 +360,34 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
           }
 
           if (videoResult.path) {
-            await window.electronAPI.setCurrentVideoPath(videoResult.path);
             const cursorTrack = cursorTrackRef.current;
             if (cursorTrack && cursorTrack.events.length > 0) {
               await window.electronAPI.storeCursorData(videoResult.path, cursorTrack);
             }
+
+            const savedRecording: SavedRecording = {
+              path: videoResult.path,
+              durationMs: duration,
+              fileName: videoFileName,
+              cursorTrack,
+            };
+
+            if (onRecordingSaved) {
+              try {
+                await onRecordingSaved(savedRecording);
+              } catch (callbackError) {
+                console.error('Error handling saved recording:', callbackError);
+              }
+            }
+
+            if (setCurrentVideoPathOnSave) {
+              await window.electronAPI.setCurrentVideoPath(videoResult.path);
+            }
           }
 
-          await window.electronAPI.switchToEditor();
+          if (switchToEditorOnSave) {
+            await window.electronAPI.switchToEditor();
+          }
         } catch (error) {
           console.error('Error saving recording:', error);
         }

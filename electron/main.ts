@@ -1,40 +1,21 @@
-import electron from 'electron'
-import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { createRequire } from 'node:module'
 
-// When executed via plain Node (e.g., vite dev runner), electron import resolves to the binary path string.
-// In that case, re-spawn this entry with the Electron binary so Electron APIs are available.
-const electronAsAny = electron as any
-const electronBinary =
-  typeof electronAsAny === 'string'
-    ? electronAsAny
-    : typeof electronAsAny?.default === 'string'
-      ? electronAsAny.default
-      : createRequire(import.meta.url)('electron')
+const electronModule = createRequire(import.meta.url)('electron') as typeof import('electron') | string
 
-if (!electronAsAny?.app) {
-  const binary = electronBinary
-  if (!binary) {
-    throw new Error('Unable to locate Electron binary to restart dev server')
-  }
-  const selfPath = fileURLToPath(import.meta.url)
-  const child = spawn(binary, [selfPath], {
-    stdio: 'inherit',
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '0' },
-  })
-  child.on('close', (code) => process.exit(code ?? 0))
-  // Prevent the rest of this file from running in plain Node.
-  process.exit(0)
-}
+export let RECORDINGS_DIR = ''
+export let VITE_DEV_SERVER_URL: string | undefined
+export let MAIN_DIST = ''
+export let RENDERER_DIST = ''
 
-const { app, BrowserWindow, Tray, Menu, nativeImage } = electron as typeof import('electron')
+if (typeof electronModule !== 'string' && electronModule.app) {
+const { app, BrowserWindow, Tray, Menu, nativeImage } = electronModule
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-export const RECORDINGS_DIR = path.join(app.getPath('userData'), 'recordings')
+RECORDINGS_DIR = path.join(app.getPath('userData'), 'recordings')
 
 
 async function ensureRecordingsDir() {
@@ -59,9 +40,9 @@ async function ensureRecordingsDir() {
 process.env.APP_ROOT = path.join(__dirname, '..')
 
 // Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
-export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
-export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
-export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
+VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
+MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
+RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
@@ -82,6 +63,7 @@ let mainWindow: BrowserWindow | null = null
 let sourceSelectorWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let selectedSourceName = ''
+let isQuitting = false
 
 // Tray Icons
 const defaultTrayIcon = getTrayIcon('openscreen.png');
@@ -174,7 +156,26 @@ app.on('window-all-closed', () => {
   // On macOS production, keep app running for tray functionality
 })
 
+app.on('before-quit', () => {
+  isQuitting = true
+  sourceSelectorWindow?.destroy()
+  sourceSelectorWindow = null
+  tray?.destroy()
+  tray = null
+})
+
+app.on('browser-window-created', (_event, window) => {
+  window.on('close', () => {
+    if (VITE_DEV_SERVER_URL && BrowserWindow.getAllWindows().length <= 1) {
+      isQuitting = true
+    }
+  })
+})
+
 app.on('activate', () => {
+  if (isQuitting) {
+    return
+  }
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -218,3 +219,4 @@ app.whenReady().then(async () => {
   )
   createWindow()
 })
+}

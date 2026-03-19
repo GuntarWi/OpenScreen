@@ -1,22 +1,43 @@
-import type { OverlayVideoRegion } from '@/components/video-editor/types';
+import type { VideoClip, VideoClipCrop } from '@/components/video-editor/types';
 
-export type OverlayLayoutRect = { x: number; y: number; width: number; height: number };
+export type ClipLayoutRect = { x: number; y: number; width: number; height: number };
 
-export type OverlayLayoutResult = {
-  box: OverlayLayoutRect;
-  dest: OverlayLayoutRect;
-  src: OverlayLayoutRect;
+export type ClipLayoutResult = {
+  box: ClipLayoutRect;
+  dest: ClipLayoutRect;
+  src: ClipLayoutRect;
 };
 
-type OverlayLayoutParams = {
-  region: OverlayVideoRegion;
+type ClipLayoutParams = {
+  region: VideoClip;
   containerWidth: number;
   containerHeight: number;
   videoWidth: number;
   videoHeight: number;
 };
 
-export function computeOverlayLayout(params: OverlayLayoutParams): OverlayLayoutResult | null {
+const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
+
+export function normalizeClipCrop(crop?: VideoClipCrop | null): VideoClipCrop | undefined {
+  if (!crop) return undefined;
+
+  const values = [crop.x, crop.y, crop.width, crop.height];
+  if (values.some((value) => !Number.isFinite(value))) {
+    return { x: 0, y: 0, width: 100, height: 100 };
+  }
+
+  const usesUnitRange = values.every((value) => value >= 0 && value <= 1);
+  const factor = usesUnitRange ? 100 : 1;
+
+  const x = clampPercent(crop.x * factor);
+  const y = clampPercent(crop.y * factor);
+  const width = Math.max(0, Math.min(100 - x, crop.width * factor));
+  const height = Math.max(0, Math.min(100 - y, crop.height * factor));
+
+  return { x, y, width, height };
+}
+
+export function computeClipLayout(params: ClipLayoutParams): ClipLayoutResult | null {
   const { region, containerWidth, containerHeight, videoWidth, videoHeight } = params;
 
   if (containerWidth <= 0 || containerHeight <= 0) return null;
@@ -33,7 +54,7 @@ export function computeOverlayLayout(params: OverlayLayoutParams): OverlayLayout
   const videoAspect = safeVideoWidth / safeVideoHeight;
   const boxAspect = boxWidth / boxHeight;
 
-  const crop = region.crop;
+  const crop = normalizeClipCrop(region.crop);
   const hasCrop = Boolean(
     crop && (crop.x !== 0 || crop.y !== 0 || crop.width !== 100 || crop.height !== 100)
   );
@@ -67,11 +88,8 @@ export function computeOverlayLayout(params: OverlayLayoutParams): OverlayLayout
       visibleY = (safeVideoHeight - visibleH) / 2;
     }
 
-    const cropWidth = Math.max(0.0001, crop.width);
-    const cropHeight = Math.max(0.0001, crop.height);
-
-    srcX = visibleX + (crop.x / cropWidth) * visibleW;
-    srcY = visibleY + (crop.y / cropHeight) * visibleH;
+    srcX = visibleX + (crop.x / 100) * visibleW;
+    srcY = visibleY + (crop.y / 100) * visibleH;
     srcW = (crop.width / 100) * visibleW;
     srcH = (crop.height / 100) * visibleH;
 

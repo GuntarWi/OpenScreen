@@ -6,16 +6,18 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { RECORDINGS_DIR } from '../main'
 
+type BrowserWindowInstance = InstanceType<typeof BrowserWindow>
+
 let selectedSource: any = null
 let globalMouseListenerInterval: NodeJS.Timeout | null = null
-let recordingWindow: BrowserWindow | null = null
+let recordingWindow: BrowserWindowInstance | null = null
 let lastMousePosition: { x: number; y: number } | null = null
 
 export function registerIpcHandlers(
   createEditorWindow: () => void,
-  createSourceSelectorWindow: () => BrowserWindow,
-  getMainWindow: () => BrowserWindow | null,
-  getSourceSelectorWindow: () => BrowserWindow | null,
+  createSourceSelectorWindow: () => BrowserWindowInstance,
+  getMainWindow: () => BrowserWindowInstance | null,
+  getSourceSelectorWindow: () => BrowserWindowInstance | null,
   onRecordingStateChange?: (recording: boolean, sourceName: string) => void
 ) {
   ipcMain.handle('get-sources', async (_, opts) => {
@@ -70,7 +72,6 @@ export function registerIpcHandlers(
     try {
       const videoPath = path.join(RECORDINGS_DIR, fileName)
       await fs.writeFile(videoPath, Buffer.from(videoData))
-      currentVideoPath = videoPath;
       return {
         success: true,
         path: videoPath,
@@ -112,17 +113,17 @@ export function registerIpcHandlers(
   ipcMain.handle('save-project', async (_, projectData: string, suggestedFileName: string) => {
     try {
       const mainWindow = getMainWindow();
-      const result = await dialog.showSaveDialog(
-        mainWindow || undefined,
-        {
-          title: 'Save OpenScreen Project',
-          defaultPath: path.join(app.getPath('documents'), suggestedFileName),
-          filters: [
-            { name: 'OpenScreen Project', extensions: ['openscreen'] }
-          ],
-          properties: ['createDirectory', 'showOverwriteConfirmation']
-        }
-      );
+      const dialogOptions: Electron.SaveDialogOptions = {
+        title: 'Save OpenScreen Project',
+        defaultPath: path.join(app.getPath('documents'), suggestedFileName),
+        filters: [
+          { name: 'OpenScreen Project', extensions: ['openscreen'] }
+        ],
+        properties: ['createDirectory', 'showOverwriteConfirmation'],
+      };
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions);
 
       if (result.canceled || !result.filePath) {
         return { success: false, cancelled: true, message: 'Save cancelled' };
@@ -231,7 +232,7 @@ export function registerIpcHandlers(
     }
   })
 
-  function startGlobalMouseListener(window: BrowserWindow | null) {
+  function startGlobalMouseListener(window: BrowserWindowInstance | null) {
     if (globalMouseListenerInterval) {
       return // Already running
     }
@@ -323,17 +324,17 @@ export function registerIpcHandlers(
   ipcMain.handle('save-exported-video', async (_, videoData: ArrayBuffer, fileName: string) => {
     try {
       const mainWindow = getMainWindow();
-      const result = await dialog.showSaveDialog(
-        mainWindow || undefined,
-        {
-          title: 'Save Exported Video',
-          defaultPath: path.join(app.getPath('downloads'), fileName),
-          filters: [
-            { name: 'MP4 Video', extensions: ['mp4'] }
-          ],
-          properties: ['createDirectory', 'showOverwriteConfirmation']
-        }
-      );
+      const dialogOptions: Electron.SaveDialogOptions = {
+        title: 'Save Exported Video',
+        defaultPath: path.join(app.getPath('downloads'), fileName),
+        filters: [
+          { name: 'MP4 Video', extensions: ['mp4'] }
+        ],
+        properties: ['createDirectory', 'showOverwriteConfirmation'],
+      };
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions);
 
       if (result.canceled || !result.filePath) {
         return {
@@ -362,10 +363,10 @@ export function registerIpcHandlers(
   ipcMain.handle('open-video-file-picker', async () => {
     try {
       const result = await dialog.showOpenDialog({
-        title: 'Select Video File',
+        title: 'Select Media File',
         defaultPath: RECORDINGS_DIR,
         filters: [
-          { name: 'Video Files', extensions: ['webm', 'mp4', 'mov', 'avi', 'mkv'] },
+          { name: 'Media Files', extensions: ['webm', 'mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'opus', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'svg'] },
           { name: 'All Files', extensions: ['*'] }
         ],
         properties: ['openFile']
@@ -392,10 +393,10 @@ export function registerIpcHandlers(
   ipcMain.handle('open-video-files-picker', async () => {
     try {
       const result = await dialog.showOpenDialog({
-        title: 'Select Overlay Videos',
+        title: 'Select Media Files',
         defaultPath: RECORDINGS_DIR,
         filters: [
-          { name: 'Video Files', extensions: ['webm', 'mp4', 'mov', 'avi', 'mkv'] },
+          { name: 'Media Files', extensions: ['webm', 'mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'opus', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'svg'] },
           { name: 'All Files', extensions: ['*'] }
         ],
         properties: ['openFile', 'multiSelections']

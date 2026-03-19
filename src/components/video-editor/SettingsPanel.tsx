@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAssetPath } from "@/lib/assetPath";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -9,13 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import Block from '@uiw/react-color-block';
 import { Trash2, Download, Crop, X, Bug, Upload, Star } from "lucide-react";
 import { toast } from "sonner";
-import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion, ScreenOffset, OverlayVideoAsset, OverlayVideoRegion, OverlayVideoFit, OverlayEffect, PaddingKeyframe } from "./types";
+import { RECORDING_ASSET_ID } from "./types";
+import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion, SpeedRegion, ScreenOffset, VideoAsset, VideoClip, AudioClip, VideoClipFit, VideoClipEffect, PaddingKeyframe, TimelineTrack, ZoomRegion, TrimRegion } from "./types";
 import { CropControl } from "./CropControl";
 import { KeyboardShortcutsHelp } from "./KeyboardShortcutsHelp";
 import { AnnotationSettingsPanel } from "./AnnotationSettingsPanel";
 import { EffectSettingsPanel } from "./EffectSettingsPanel";
-import { type AspectRatio } from "@/utils/aspectRatioUtils";
+import { SpeedSettingsPanel } from "./SpeedSettingsPanel";
+import { getAspectRatioValue, type AspectRatio } from "@/utils/aspectRatioUtils";
 import type { ExportQuality } from "@/lib/exporter";
+import { resolveRecordingVisibleRect, type InteractionRect } from "@/utils/recordingInteractionLayout";
 
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_RELATIVE = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `wallpapers/wallpaper${i + 1}.jpg`);
@@ -70,14 +73,27 @@ interface SettingsPanelProps {
   currentTime?: number;
   screenOffset?: ScreenOffset;
   onScreenOffsetChange?: (patch: Partial<ScreenOffset>) => void;
-  overlayAssets?: OverlayVideoAsset[];
-  overlayRegions?: OverlayVideoRegion[];
-  selectedOverlayId?: string | null;
-  onOverlayAssetAdd?: () => void;
-  onOverlayAssetRemove?: (id: string) => void;
-  onOverlayAddToTimeline?: (assetId: string) => void;
-  onOverlayRegionChange?: (id: string, patch: Partial<OverlayVideoRegion>) => void;
-  onOverlayOrderChange?: (orderedIds: string[]) => void;
+  videoAssets?: VideoAsset[];
+  selectedTrack?: TimelineTrack | null;
+  onTrackNameChange?: (trackId: string, name: string) => void;
+  onTrackHeightChange?: (trackId: string, height: number) => void;
+  onTrackHiddenChange?: (trackId: string, hidden: boolean) => void;
+  onTrackMuteChange?: (trackId: string, muted: boolean) => void;
+  onTrackDelete?: (trackId: string) => void;
+  onAddItemToTrack?: (trackId: string) => void;
+  videoClips?: VideoClip[];
+  audioClips?: AudioClip[];
+  zoomRegions?: ZoomRegion[];
+  trimRegions?: TrimRegion[];
+  selectedClipId?: string | null;
+  onVideoAssetAdd?: () => void;
+  onVideoAssetRemove?: (id: string) => void;
+  onClipAddToTimeline?: (assetId: string) => void;
+  onAudioAddToTimeline?: (assetId: string) => void;
+  defaultImageClipDurationMs?: number;
+  onDefaultImageClipDurationMsChange?: (durationMs: number) => void;
+  onClipChange?: (id: string, patch: Partial<VideoClip>) => void;
+  onClipRectChange?: (id: string, rect: InteractionRect) => void;
   cropRegion?: CropRegion;
   onCropChange?: (region: CropRegion) => void;
   aspectRatio: AspectRatio;
@@ -100,6 +116,10 @@ interface SettingsPanelProps {
   selectedEffectId?: string | null;
   onEffectChange?: (id: string, patch: Partial<EffectRegion>) => void;
   onEffectDelete?: (id: string) => void;
+  speedRegions?: SpeedRegion[];
+  selectedSpeedId?: string | null;
+  onSpeedChange?: (id: string, patch: Partial<SpeedRegion>) => void;
+  onSpeedDelete?: (id: string) => void;
   cursorTrack?: CursorTrack | null;
   selectedCursorId?: string | null;
   onCursorStyleChange?: (style: Partial<CursorStyle>) => void;
@@ -154,15 +174,27 @@ export function SettingsPanel({
   onPaddingKeyframesChange,
   currentTime = 0,
   screenOffset = { x: 0, y: 0 },
-  onScreenOffsetChange,
-  overlayAssets = [],
-  overlayRegions = [],
-  selectedOverlayId,
-  onOverlayAssetAdd,
-  onOverlayAssetRemove,
-  onOverlayAddToTimeline,
-  onOverlayRegionChange,
-  onOverlayOrderChange,
+  videoAssets = [],
+  selectedTrack,
+  onTrackNameChange,
+  onTrackHeightChange,
+  onTrackHiddenChange,
+  onTrackMuteChange,
+  onTrackDelete,
+  onAddItemToTrack,
+  videoClips = [],
+  audioClips = [],
+  zoomRegions = [],
+  trimRegions = [],
+  selectedClipId,
+  onVideoAssetAdd,
+  onVideoAssetRemove,
+  onClipAddToTimeline,
+  onAudioAddToTimeline,
+  defaultImageClipDurationMs = 3000,
+  onDefaultImageClipDurationMsChange,
+  onClipChange,
+  onClipRectChange,
   cropRegion,
   onCropChange, 
   aspectRatio, 
@@ -185,6 +217,10 @@ export function SettingsPanel({
   selectedEffectId,
   onEffectChange,
   onEffectDelete,
+  speedRegions = [],
+  selectedSpeedId,
+  onSpeedChange,
+  onSpeedDelete,
   cursorTrack,
   selectedCursorId,
   onCursorStyleChange,
@@ -228,63 +264,115 @@ export function SettingsPanel({
   
   const [selectedColor, setSelectedColor] = useState('#ADADAD');
   const [gradient, setGradient] = useState<string>(GRADIENTS[0]);
-  const [draggingOverlayId, setDraggingOverlayId] = useState<string | null>(null);
-  const [dragOverOverlayId, setDragOverOverlayId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'screen' | 'media' | 'clips' | 'export'>('screen');
 
-  const overlayAssetMap = useMemo(
-    () => new Map(overlayAssets.map((asset) => [asset.id, asset])),
-    [overlayAssets],
+  const mediaAssets = useMemo(
+    () => videoAssets.filter((asset) => asset.id !== RECORDING_ASSET_ID),
+    [videoAssets],
   );
-  const overlayLayerOrder = useMemo(
-    () => [...overlayRegions].sort((a, b) => b.zIndex - a.zIndex),
-    [overlayRegions],
+  const videoMediaAssets = useMemo(
+    () => mediaAssets.filter((asset) => asset.kind !== 'audio'),
+    [mediaAssets],
   );
+  const audioMediaAssets = useMemo(
+    () => mediaAssets.filter((asset) => asset.kind === 'audio'),
+    [mediaAssets],
+  );
+  const getVisualAssetDurationMs = useCallback((asset: VideoAsset) => (
+    asset.kind === 'image' ? defaultImageClipDurationMs : asset.durationMs
+  ), [defaultImageClipDurationMs]);
+  const getVisualAssetKindLabel = useCallback((asset: VideoAsset) => {
+    if (asset.kind === 'image') return 'Image';
+    if (asset.kind === 'recording') return 'Recording';
+    return 'Video';
+  }, []);
   const [showCropDropdown, setShowCropDropdown] = useState(false);
-  const screenOffsetX = screenOffset?.x ?? 0;
-  const screenOffsetY = screenOffset?.y ?? 0;
-  const overlayCount = overlayRegions.length;
-  const selectedOverlay = selectedOverlayId
-    ? overlayRegions.find((region) => region.id === selectedOverlayId) ?? null
+  const clipCount = videoClips.filter(
+    (clip) => !(clip.applyCamera || clip.assetId === RECORDING_ASSET_ID),
+  ).length;
+  const audioClipCount = audioClips.length;
+  const selectedClip = selectedClipId
+    ? videoClips.find((clip) => clip.id === selectedClipId) ?? null
     : null;
-  const overlayOrderIds = useMemo(
-    () => overlayLayerOrder.map((region) => region.id),
-    [overlayLayerOrder],
+  const selectedClipAsset = selectedClip
+    ? videoAssets.find((asset) => asset.id === selectedClip.assetId) ?? null
+    : null;
+  const selectedClipIsRecording = Boolean(
+    selectedClip && (selectedClip.applyCamera || selectedClip.assetId === RECORDING_ASSET_ID),
   );
+  const selectedClipUsesScreenRoundness = Boolean(
+    selectedClip && (selectedClipIsRecording || selectedClipAsset?.kind === 'recording'),
+  );
+  const selectedClipPlacement = useMemo(() => {
+    if (!selectedClip) return null;
+    if (!selectedClipIsRecording) {
+      return {
+        x: selectedClip.position.x,
+        y: selectedClip.position.y,
+        width: selectedClip.size.width,
+        height: selectedClip.size.height,
+      };
+    }
 
-  const handleOverlayDragStart = (id: string) => (event: React.DragEvent<HTMLDivElement>) => {
-    if (!onOverlayOrderChange) return;
-    event.dataTransfer.setData('text/plain', id);
-    event.dataTransfer.effectAllowed = 'move';
-    setDraggingOverlayId(id);
-  };
+    const sourceWidth = videoElement?.videoWidth || 0;
+    const sourceHeight = videoElement?.videoHeight || 0;
+    const stageWidth = getAspectRatioValue(aspectRatio);
+    const stageHeight = 1;
+    if (!cropRegion || sourceWidth <= 0 || sourceHeight <= 0 || stageWidth <= 0 || stageHeight <= 0) {
+      return null;
+    }
 
-  const handleOverlayDragOver = (id: string) => (event: React.DragEvent<HTMLDivElement>) => {
-    if (!onOverlayOrderChange) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    setDragOverOverlayId(id);
-  };
+    const rect = resolveRecordingVisibleRect({
+      stageWidth,
+      stageHeight,
+      sourceWidth,
+      sourceHeight,
+      cropRegion,
+      padding,
+      screenOffset,
+    });
+    if (!rect) return null;
 
-  const handleOverlayDrop = (targetId: string) => (event: React.DragEvent<HTMLDivElement>) => {
-    if (!onOverlayOrderChange) return;
-    event.preventDefault();
-    const draggedId = event.dataTransfer.getData('text/plain') || draggingOverlayId;
-    setDragOverOverlayId(null);
-    setDraggingOverlayId(null);
-    if (!draggedId || draggedId === targetId) return;
-    const nextOrder = [...overlayOrderIds];
-    const fromIndex = nextOrder.indexOf(draggedId);
-    const toIndex = nextOrder.indexOf(targetId);
-    if (fromIndex === -1 || toIndex === -1) return;
-    nextOrder.splice(fromIndex, 1);
-    nextOrder.splice(toIndex, 0, draggedId);
-    onOverlayOrderChange?.(nextOrder);
-  };
+    return {
+      x: (rect.x / stageWidth) * 100,
+      y: (rect.y / stageHeight) * 100,
+      width: (rect.width / stageWidth) * 100,
+      height: (rect.height / stageHeight) * 100,
+    };
+  }, [selectedClip, selectedClipIsRecording, videoElement, aspectRatio, cropRegion, padding, screenOffset]);
 
-  const handleOverlayDragEnd = () => {
-    setDragOverOverlayId(null);
-    setDraggingOverlayId(null);
-  };
+  const updateSelectedClipPlacement = useCallback((patch: Partial<InteractionRect>) => {
+    if (!selectedClip || !selectedClipPlacement) return;
+
+    const nextRect = {
+      ...selectedClipPlacement,
+      ...patch,
+    };
+
+    if (onClipRectChange) {
+      onClipRectChange(selectedClip.id, nextRect);
+      return;
+    }
+
+    if (onClipChange && !selectedClipIsRecording) {
+      onClipChange(selectedClip.id, {
+        position: {
+          x: nextRect.x,
+          y: nextRect.y,
+        },
+        size: {
+          width: nextRect.width,
+          height: nextRect.height,
+        },
+      });
+    }
+  }, [selectedClip, selectedClipPlacement, onClipRectChange, onClipChange, selectedClipIsRecording]);
+
+  useEffect(() => {
+    if (selectedClip) {
+      setActiveTab('clips');
+    }
+  }, [selectedClip]);
   // Local follow state to allow toggling even if parent doesn't pass handler
   const [zoomFollowEnabledLocal, setZoomFollowEnabledLocal] = useState<boolean>(Boolean((zoomFollowEnabled as boolean) || false));
   useEffect(() => {
@@ -367,7 +455,6 @@ export function SettingsPanel({
   const selectedEffect = selectedEffectId
     ? effectRegions.find(effect => effect.id === selectedEffectId)
     : null;
-
   // If an annotation is selected, show annotation settings instead
   if (selectedAnnotation && onAnnotationContentChange && onAnnotationTypeChange && onAnnotationStyleChange && onAnnotationDelete) {
     return (
@@ -404,15 +491,159 @@ export function SettingsPanel({
     );
   }
 
+  const selectedSpeedRegion = selectedSpeedId
+    ? speedRegions.find((r) => r.id === selectedSpeedId)
+    : null;
+
+  if (selectedSpeedRegion && onSpeedChange && onSpeedDelete) {
+    return (
+      <SpeedSettingsPanel
+        region={selectedSpeedRegion}
+        onChange={(patch) => onSpeedChange(selectedSpeedRegion.id, patch)}
+        onDelete={() => onSpeedDelete(selectedSpeedRegion.id)}
+      />
+    );
+  }
+
+  if (selectedTrack) {
+    const trackItemCount =
+      videoClips.filter((clip) => clip.trackId === selectedTrack.id).length +
+      audioClips.filter((clip) => clip.trackId === selectedTrack.id).length +
+      zoomRegions.filter((region) => region.trackId === selectedTrack.id).length +
+      trimRegions.filter((region) => region.trackId === selectedTrack.id).length +
+      annotationRegions.filter((annotation) => annotation.trackId === selectedTrack.id).length +
+      effectRegions.filter((effect) => effect.trackId === selectedTrack.id).length +
+      speedRegions.filter((region) => region.trackId === selectedTrack.id).length +
+      (cursorTrack?.trackId === selectedTrack.id ? 1 : 0);
+    const canAddItem = ['zoom', 'trim', 'effect', 'annotation', 'speed'].includes(selectedTrack.itemType);
+    const canMuteTrack = selectedTrack.type !== 'recording';
+    const trackTypeLabel = selectedTrack.type === 'generic'
+      ? 'Universal'
+      : selectedTrack.type.charAt(0).toUpperCase() + selectedTrack.type.slice(1);
+    const addLabel = (() => {
+      switch (selectedTrack.itemType) {
+        case 'zoom':
+          return 'Add Zoom';
+        case 'trim':
+          return 'Add Trim';
+        case 'effect':
+          return 'Add Effect';
+        case 'annotation':
+          return 'Add Annotation';
+        case 'speed':
+          return 'Add Speed Region';
+        default:
+          return 'Add Item';
+      }
+    })();
+
+    return (
+      <div className="flex-[2] min-w-0 bg-[#09090b] border border-white/5 rounded-2xl p-4 flex flex-col shadow-xl h-full overflow-y-auto custom-scrollbar">
+        <div className="mb-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-100">Track Settings</div>
+              <div className="text-xs text-slate-500 mt-1 uppercase tracking-[0.18em]">{trackTypeLabel}</div>
+            </div>
+            <div className="text-[10px] font-medium px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300">
+              {trackItemCount} items
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+            <div className="text-xs font-medium text-slate-200">Track Name</div>
+            <input
+              type="text"
+              value={selectedTrack.name}
+              onChange={(event) => onTrackNameChange?.(selectedTrack.id, event.target.value)}
+              className="w-full p-2 rounded bg-black/20 text-slate-200 border border-white/10"
+              placeholder="Track name"
+            />
+          </div>
+
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-slate-200">Track Height</div>
+              <span className="text-[10px] text-slate-400 font-mono">{Math.round(selectedTrack.height)}px</span>
+            </div>
+            <Slider
+              value={[selectedTrack.height]}
+              onValueChange={(values) => onTrackHeightChange?.(selectedTrack.id, values[0])}
+              min={36}
+              max={160}
+              step={1}
+              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+            />
+          </div>
+
+          <div className={cn("grid gap-3", canMuteTrack ? "grid-cols-2" : "grid-cols-1")}>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+              <div className="text-xs font-medium text-slate-200">Hide Track</div>
+              <Switch
+                checked={Boolean(selectedTrack.hidden)}
+                onCheckedChange={(value) => onTrackHiddenChange?.(selectedTrack.id, Boolean(value))}
+                className="data-[state=checked]:bg-[#34B27B]"
+              />
+            </div>
+            {canMuteTrack ? (
+              <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                <div className="text-xs font-medium text-slate-200">Mute Track Audio</div>
+                <Switch
+                  checked={Boolean(selectedTrack.muted)}
+                  onCheckedChange={(value) => onTrackMuteChange?.(selectedTrack.id, Boolean(value))}
+                  className="data-[state=checked]:bg-[#34B27B]"
+                />
+              </div>
+            ) : null}
+          </div>
+
+          {selectedTrack.type === 'generic' ? (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100/90">
+              Universal tracks accept clips, audio, effects, speed, trim, zoom, annotation, and cursor items on the same row.
+            </div>
+          ) : null}
+
+          {canAddItem ? (
+            <Button
+              onClick={() => onAddItemToTrack?.(selectedTrack.id)}
+              className="w-full gap-2 bg-[#34B27B] text-white hover:bg-[#2da06d]"
+            >
+              <Star className="w-4 h-4" />
+              {addLabel}
+            </Button>
+          ) : null}
+
+          <Button
+            onClick={() => onTrackDelete?.(selectedTrack.id)}
+            variant="destructive"
+            disabled={selectedTrack.type === 'recording'}
+            className="w-full gap-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/30 disabled:opacity-40"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete Track
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-[2] min-w-0 bg-[#09090b] border border-white/5 rounded-2xl p-4 flex flex-col shadow-xl h-full overflow-y-auto custom-scrollbar">
-      <Tabs defaultValue="screen" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-2 h-auto rounded-xl">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'screen' | 'media' | 'clips' | 'export')} className="flex-1 flex flex-col min-h-0">
+        <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-4 h-auto rounded-xl">
           <TabsTrigger value="screen" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
             Screen
           </TabsTrigger>
-          <TabsTrigger value="overlays" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
-            Overlays
+          <TabsTrigger value="media" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
+            Media
+          </TabsTrigger>
+          <TabsTrigger value="clips" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
+            Clips
+          </TabsTrigger>
+          <TabsTrigger value="export" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
+            Export
           </TabsTrigger>
         </TabsList>
         <TabsContent value="screen" className="mt-0 space-y-4">
@@ -935,35 +1166,8 @@ export function SettingsPanel({
             )}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2.5 mt-2">
-          <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium text-slate-200">Position X</div>
-              <span className="text-[10px] text-slate-400 font-mono">{Math.round(screenOffsetX)}%</span>
-            </div>
-            <Slider
-              value={[screenOffsetX]}
-              onValueChange={(values) => onScreenOffsetChange?.({ x: values[0] })}
-              min={-50}
-              max={50}
-              step={1}
-              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
-            />
-          </div>
-          <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium text-slate-200">Position Y</div>
-              <span className="text-[10px] text-slate-400 font-mono">{Math.round(screenOffsetY)}%</span>
-            </div>
-            <Slider
-              value={[screenOffsetY]}
-              onValueChange={(values) => onScreenOffsetChange?.({ y: values[0] })}
-              min={-50}
-              max={50}
-              step={1}
-              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
-            />
-          </div>
+        <div className="mt-2 rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-[11px] text-slate-400">
+          Move and resize the recording from the clip selection. Screen settings here only control crop, roundness, and the base size/keyframes.
         </div>
       </div>
 
@@ -1143,276 +1347,386 @@ export function SettingsPanel({
         </div>
       </Tabs>
 
-      <div className="mt-4 pt-4 border-t border-white/5">
-        <div className="mb-2 text-xs font-medium text-slate-400">Export Quality</div>
-        {/* Export Quality Button Group */}
-        <div className="mb-2.5 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-3 h-auto rounded-xl">
-          <button
-            onClick={() => onExportQualityChange?.('medium')}
-            className={cn(
-              "py-2 rounded-lg transition-all text-xs font-medium",
-              exportQuality === 'medium'
-                ? "bg-white text-black"
-                : "text-slate-400 hover:text-slate-200"
-            )}
-          >
-            Low
-          </button>
-          <button
-            onClick={() => onExportQualityChange?.('good')}
-            className={cn(
-              "py-2 rounded-lg transition-all text-xs font-medium",
-              exportQuality === 'good'
-                ? "bg-white text-black"
-                : "text-slate-400 hover:text-slate-200"
-            )}
-          >
-            Medium
-          </button>
-          <button
-            onClick={() => onExportQualityChange?.('source')}
-            className={cn(
-              "py-2 rounded-lg transition-all text-xs font-medium",
-              exportQuality === 'source'
-                ? "bg-white text-black"
-                : "text-slate-400 hover:text-slate-200"
-            )}
-          >
-            High
-          </button>
-        </div>
-        
-        <Button
-          type="button"
-          size="lg"
-          onClick={onExport}
-          className="w-full py-6 text-lg font-semibold flex items-center justify-center gap-3 bg-[#34B27B] text-white rounded-xl shadow-lg shadow-[#34B27B]/20 hover:bg-[#34B27B]/90 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
-        >
-          <Download className="w-5 h-5" />
-          <span>Export Video</span>
-        </Button>
-        <div className="flex gap-2 mt-4">
-          <button
-            type="button"
-            onClick={() => {
-              window.electronAPI?.openExternalUrl('https://github.com/siddharthvaddem/openscreen/issues/new/choose');
-            }}
-            className="flex-1 flex items-center justify-center gap-2 text-xs py-2"
-          >
-            <Bug className="w-3 h-3 text-[#34B27B]" />
-            <span>Report a Bug</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              window.electronAPI?.openExternalUrl('https://github.com/siddharthvaddem/openscreen');
-            }}
-            className="flex-1 flex items-center justify-center gap-2 text-xs"
-          >
-            <Star className="w-3 h-3 text-yellow-400" />
-            <span>Star on GitHub</span>
-          </button>
-        </div>
-      </div>
         </TabsContent>
-        <TabsContent value="overlays" className="mt-0 space-y-4">
-          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+        <TabsContent value="media" className="mt-0 space-y-4">
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="text-xs font-medium text-slate-200">Overlay Videos</div>
+              <div className="text-xs font-medium text-slate-200">Imported Media</div>
               <span className="text-[10px] text-slate-400 font-mono">
-                {overlayAssets.length} assets - {overlayCount} on timeline
+                {mediaAssets.length} assets - {clipCount} visual - {audioClipCount} audio
               </span>
             </div>
             <Button
               type="button"
-              onClick={onOverlayAssetAdd}
+              onClick={onVideoAssetAdd}
               className="w-full gap-2 bg-white/5 text-slate-200 border border-white/10 hover:bg-[#34B27B] hover:text-white hover:border-[#34B27B] transition-all"
               variant="outline"
             >
               <Upload className="w-4 h-4" />
-              Upload Video
+              Upload Media
             </Button>
             <p className="text-[11px] text-slate-500">
-              Drag a video to the timeline overlay row, or tap Add to place at the playhead.
+              Upload video, image, or audio, then drag it to the timeline or add it at the playhead.
             </p>
-          </div>
-          {overlayLayerOrder.length > 0 && (
-            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="text-xs font-medium text-slate-200">Overlay Layers</div>
-                <span className="text-[10px] text-slate-500">Top renders in front</span>
+                <div className="text-xs font-medium text-slate-200">Default Image Duration</div>
+                <div className="text-[10px] text-slate-400 font-mono">
+                  {(defaultImageClipDurationMs / 1000).toFixed(1)}s
+                </div>
               </div>
-              <div className="space-y-2">
-                {overlayLayerOrder.map((region) => {
-                  const asset = overlayAssetMap.get(region.assetId);
-                  const label = asset?.name || 'Overlay';
-                  const isSelected = region.id === selectedOverlayId;
-                  const isDragging = draggingOverlayId === region.id;
-                  const isDragOver = dragOverOverlayId === region.id;
-                  return (
-                    <div
-                      key={region.id}
-                      draggable={Boolean(onOverlayOrderChange)}
-                      onDragStart={handleOverlayDragStart(region.id)}
-                      onDragOver={handleOverlayDragOver(region.id)}
-                      onDrop={handleOverlayDrop(region.id)}
-                      onDragEnd={handleOverlayDragEnd}
-                      className={cn(
-                        "flex items-center justify-between rounded-lg border px-3 py-2 text-xs text-slate-200",
-                        isSelected ? "border-[#34B27B] bg-[#34B27B]/10" : "border-white/10 bg-black/20",
-                        isDragging ? "opacity-60" : "",
-                        isDragOver ? "ring-1 ring-[#34B27B]" : ""
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-[#34B27B]" />
-                        <span className="truncate max-w-[170px]">{label}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        {Math.max(0, (region.endMs - region.startMs) / 1000).toFixed(1)}s
-                      </span>
-                    </div>
-                  );
-                })}
+              <Slider
+                value={[defaultImageClipDurationMs / 1000]}
+                onValueChange={(values) => onDefaultImageClipDurationMsChange?.(Math.max(500, Math.round(values[0] * 1000)))}
+                min={1}
+                max={30}
+                step={0.5}
+                className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+              />
+              <div className="text-[10px] text-slate-500">
+                New image clips use this duration when you add them to the timeline.
               </div>
             </div>
-          )}
-          {selectedOverlay && onOverlayRegionChange && (
-            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
+            <div className="pt-3 border-t border-white/5 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="text-xs font-medium text-slate-200">Selected Overlay</div>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  {Math.round(selectedOverlay.borderRadius ?? 0)}px
-                </span>
+                <div className="text-xs font-medium text-slate-200">Visual Library</div>
+                <span className="text-[10px] text-slate-500">Video and image assets</span>
               </div>
-              <div className="grid gap-3">
-                <div>
-                  <div className="text-[11px] text-slate-400 mb-1">Corner Radius</div>
-                  <Slider
-                    value={[selectedOverlay.borderRadius ?? 0]}
-                    onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { borderRadius: values[0] })}
-                    min={0}
-                    max={32}
-                    step={1}
-                    className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
-                  />
+              <div className="grid gap-2">
+                {videoMediaAssets.length === 0 ? (
+                  <div className="text-xs text-slate-500 text-center py-6 border border-dashed border-white/10 rounded-xl">
+                    No visual assets yet
+                  </div>
+                ) : (
+                  videoMediaAssets.map((asset) => (
+                    <div
+                      key={asset.id}
+                      className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-3"
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('application/x-clip-asset', asset.id);
+                        event.dataTransfer.effectAllowed = 'copy';
+                      }}
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="h-12 w-20 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-black/20">
+                          {asset.kind === 'image' ? (
+                            <img
+                              src={asset.src}
+                              alt={asset.name}
+                              className="h-full w-full object-cover"
+                              draggable={false}
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              {getVisualAssetKindLabel(asset)}
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs text-slate-200 truncate">{asset.name}</div>
+                          <div className="text-[10px] text-slate-500">
+                            {getVisualAssetKindLabel(asset)} - {(getVisualAssetDurationMs(asset) / 1000).toFixed(1)}s
+                            {asset.width > 0 && asset.height > 0 ? ` - ${asset.width}x${asset.height}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-slate-200 hover:text-white hover:bg-white/10"
+                          onClick={() => onClipAddToTimeline?.(asset.id)}
+                        >
+                          Add
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                          onClick={() => onVideoAssetRemove?.(asset.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="pt-3 border-t border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Audio Library</div>
+                <span className="text-[10px] text-slate-500">Timeline audio track</span>
+              </div>
+              <div className="grid gap-2">
+                {audioMediaAssets.length === 0 ? (
+                  <div className="text-xs text-slate-500 text-center py-6 border border-dashed border-white/10 rounded-xl">
+                    No audio assets yet
+                  </div>
+                ) : (
+                  audioMediaAssets.map((asset) => (
+                    <div
+                      key={asset.id}
+                      className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-3"
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('application/x-audio-asset', asset.id);
+                        event.dataTransfer.effectAllowed = 'copy';
+                      }}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate-200 truncate">{asset.name}</div>
+                        <div className="text-[10px] text-slate-500">
+                          {(asset.durationMs / 1000).toFixed(1)}s
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-slate-200 hover:text-white hover:bg-white/10"
+                          onClick={() => onAudioAddToTimeline?.(asset.id)}
+                        >
+                          Add
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                          onClick={() => onVideoAssetRemove?.(asset.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+        <TabsContent value="clips" className="mt-0 space-y-4">
+          {!selectedClip || !onClipChange ? (
+            <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center">
+              <div className="text-sm font-medium text-slate-200">No clip selected</div>
+              <p className="mt-2 text-xs text-slate-500">
+                Select a visual clip on the timeline to edit placement, crop, transitions, chroma key, and corner radius here.
+              </p>
+            </div>
+          ) : null}
+          {selectedClip && onClipChange && (
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
+              {selectedClipIsRecording && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
+                  Recording layout is edited here now. Crop, roundness, and size keyframes still live in the Screen tab.
                 </div>
-                <div>
-                  <div className="text-[11px] text-slate-400 mb-1">Fit</div>
-                  <Select
-                    value={selectedOverlay.fit ?? 'contain'}
-                    onValueChange={(value) => onOverlayRegionChange(selectedOverlay.id, { fit: value as OverlayVideoFit })}
-                  >
-                    <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-9 text-xs">
-                      <SelectValue placeholder="Select fit" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#1a1a1c] border-white/10 text-slate-200">
-                      <SelectItem value="contain">Fit (no crop)</SelectItem>
-                      <SelectItem value="cover">Fill (crop)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="pt-2 border-t border-white/5">
-                  <div className="text-[11px] text-slate-400 mb-2">Source Crop</div>
+              )}
+              {selectedClipPlacement && (
+                <div className="contents">
+                <div className="pt-1">
+                  <div className="text-[11px] text-slate-400 mb-2">Placement</div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <div className="text-[10px] text-slate-500 mb-1">X: {selectedOverlay.crop?.x ?? 0}%</div>
+                      <div className="text-[10px] text-slate-500 mb-1">X: {Math.round(selectedClipPlacement.x)}%</div>
                       <Slider
-                        value={[selectedOverlay.crop?.x ?? 0]}
-                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
-                          crop: { 
-                            x: values[0], 
-                            y: selectedOverlay.crop?.y ?? 0, 
-                            width: Math.min(selectedOverlay.crop?.width ?? 100, 100 - values[0]), 
-                            height: selectedOverlay.crop?.height ?? 100 
-                          } 
-                        })}
-                        min={0}
-                        max={90}
+                        value={[selectedClipPlacement.x]}
+                        onValueChange={(values) => updateSelectedClipPlacement({ x: values[0] })}
+                        min={selectedClipIsRecording ? -50 : 0}
+                        max={100}
                         step={1}
-                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                        className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
                     </div>
                     <div>
-                      <div className="text-[10px] text-slate-500 mb-1">Y: {selectedOverlay.crop?.y ?? 0}%</div>
+                      <div className="text-[10px] text-slate-500 mb-1">Y: {Math.round(selectedClipPlacement.y)}%</div>
                       <Slider
-                        value={[selectedOverlay.crop?.y ?? 0]}
-                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
-                          crop: { 
-                            x: selectedOverlay.crop?.x ?? 0, 
-                            y: values[0], 
-                            width: selectedOverlay.crop?.width ?? 100, 
-                            height: Math.min(selectedOverlay.crop?.height ?? 100, 100 - values[0]) 
-                          } 
-                        })}
-                        min={0}
-                        max={90}
+                        value={[selectedClipPlacement.y]}
+                        onValueChange={(values) => updateSelectedClipPlacement({ y: values[0] })}
+                        min={selectedClipIsRecording ? -50 : 0}
+                        max={100}
                         step={1}
-                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                        className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
                     </div>
                     <div>
-                      <div className="text-[10px] text-slate-500 mb-1">Width: {selectedOverlay.crop?.width ?? 100}%</div>
+                      <div className="text-[10px] text-slate-500 mb-1">Width: {Math.round(selectedClipPlacement.width)}%</div>
                       <Slider
-                        value={[selectedOverlay.crop?.width ?? 100]}
-                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
-                          crop: { 
-                            x: selectedOverlay.crop?.x ?? 0, 
-                            y: selectedOverlay.crop?.y ?? 0, 
-                            width: values[0], 
-                            height: selectedOverlay.crop?.height ?? 100 
-                          } 
-                        })}
-                        min={10}
-                        max={100 - (selectedOverlay.crop?.x ?? 0)}
+                        value={[selectedClipPlacement.width]}
+                        onValueChange={(values) => updateSelectedClipPlacement({ width: values[0] })}
+                        min={5}
+                        max={100}
                         step={1}
-                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                        className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
                     </div>
                     <div>
-                      <div className="text-[10px] text-slate-500 mb-1">Height: {selectedOverlay.crop?.height ?? 100}%</div>
+                      <div className="text-[10px] text-slate-500 mb-1">Height: {Math.round(selectedClipPlacement.height)}%</div>
                       <Slider
-                        value={[selectedOverlay.crop?.height ?? 100]}
-                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { 
-                          crop: { 
-                            x: selectedOverlay.crop?.x ?? 0, 
-                            y: selectedOverlay.crop?.y ?? 0, 
-                            width: selectedOverlay.crop?.width ?? 100, 
-                            height: values[0] 
-                          } 
-                        })}
-                        min={10}
-                        max={100 - (selectedOverlay.crop?.y ?? 0)}
+                        value={[selectedClipPlacement.height]}
+                        onValueChange={(values) => updateSelectedClipPlacement({ height: values[0] })}
+                        min={5}
+                        max={100}
                         step={1}
-                        className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                        className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
                     </div>
                   </div>
-                  {(selectedOverlay.crop && (selectedOverlay.crop.x !== 0 || selectedOverlay.crop.y !== 0 || selectedOverlay.crop.width !== 100 || selectedOverlay.crop.height !== 100)) && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="w-full mt-2 text-xs text-slate-400 hover:text-white"
-                      onClick={() => onOverlayRegionChange(selectedOverlay.id, { crop: { x: 0, y: 0, width: 100, height: 100 } })}
-                    >
-                      Reset Crop
-                    </Button>
-                  )}
                 </div>
+                {selectedClipAsset?.kind === 'recording' && !selectedClipIsRecording && (
+                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100/90">
+                    This continued recording inherits roundness from the Screen tab.
+                  </div>
+                )}
+                {!selectedClipUsesScreenRoundness && (
+                  <div>
+                    <div className="text-[11px] text-slate-400 mb-1">Corner Radius</div>
+                    <Slider
+                      value={[selectedClip.borderRadius ?? 0]}
+                      onValueChange={(values) => onClipChange(selectedClip.id, { borderRadius: values[0] })}
+                      min={0}
+                      max={32}
+                      step={1}
+                      className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                    />
+                  </div>
+                )}
+                </div>
+              )}
+                {!selectedClipIsRecording && (
+                  <>
+                    <div>
+                      <div className="text-[11px] text-slate-400 mb-1">Fit</div>
+                      <Select
+                        value={selectedClip.fit ?? 'contain'}
+                        onValueChange={(value) => onClipChange(selectedClip.id, { fit: value as VideoClipFit })}
+                      >
+                        <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-9 text-xs">
+                          <SelectValue placeholder="Select fit" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#1a1a1c] border-white/10 text-slate-200">
+                          <SelectItem value="contain">Fit (no crop)</SelectItem>
+                          <SelectItem value="cover">Fill (crop)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="pt-2 border-t border-white/5">
+                      <div className="text-[11px] text-slate-400 mb-2">Source Crop</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="text-[10px] text-slate-500 mb-1">X: {selectedClip.crop?.x ?? 0}%</div>
+                          <Slider
+                            value={[selectedClip.crop?.x ?? 0]}
+                            onValueChange={(values) => onClipChange(selectedClip.id, {
+                              crop: {
+                                x: values[0],
+                                y: selectedClip.crop?.y ?? 0,
+                                width: Math.min(selectedClip.crop?.width ?? 100, 100 - values[0]),
+                                height: selectedClip.crop?.height ?? 100
+                              }
+                            })}
+                            min={0}
+                            max={90}
+                            step={1}
+                            className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                          />
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-slate-500 mb-1">Y: {selectedClip.crop?.y ?? 0}%</div>
+                          <Slider
+                            value={[selectedClip.crop?.y ?? 0]}
+                            onValueChange={(values) => onClipChange(selectedClip.id, {
+                              crop: {
+                                x: selectedClip.crop?.x ?? 0,
+                                y: values[0],
+                                width: selectedClip.crop?.width ?? 100,
+                                height: Math.min(selectedClip.crop?.height ?? 100, 100 - values[0])
+                              }
+                            })}
+                            min={0}
+                            max={90}
+                            step={1}
+                            className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                          />
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-slate-500 mb-1">Width: {selectedClip.crop?.width ?? 100}%</div>
+                          <Slider
+                            value={[selectedClip.crop?.width ?? 100]}
+                            onValueChange={(values) => onClipChange(selectedClip.id, {
+                              crop: {
+                                x: selectedClip.crop?.x ?? 0,
+                                y: selectedClip.crop?.y ?? 0,
+                                width: values[0],
+                                height: selectedClip.crop?.height ?? 100
+                              }
+                            })}
+                            min={10}
+                            max={100 - (selectedClip.crop?.x ?? 0)}
+                            step={1}
+                            className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                          />
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-slate-500 mb-1">Height: {selectedClip.crop?.height ?? 100}%</div>
+                          <Slider
+                            value={[selectedClip.crop?.height ?? 100]}
+                            onValueChange={(values) => onClipChange(selectedClip.id, {
+                              crop: {
+                                x: selectedClip.crop?.x ?? 0,
+                                y: selectedClip.crop?.y ?? 0,
+                                width: selectedClip.crop?.width ?? 100,
+                                height: values[0]
+                              }
+                            })}
+                            min={10}
+                            max={100 - (selectedClip.crop?.y ?? 0)}
+                            step={1}
+                            className="w-full [&_[role=slider]]:bg-violet-500 [&_[role=slider]]:border-violet-500"
+                          />
+                        </div>
+                      </div>
+                      {(selectedClip.crop && (selectedClip.crop.x !== 0 || selectedClip.crop.y !== 0 || selectedClip.crop.width !== 100 || selectedClip.crop.height !== 100)) && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="w-full mt-2 text-xs text-slate-400 hover:text-white"
+                          onClick={() => onClipChange(selectedClip.id, { crop: { x: 0, y: 0, width: 100, height: 100 } })}
+                        >
+                          Reset Crop
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                )}
                 <div className="pt-2 border-t border-white/5">
-                  <div className="text-[11px] text-slate-400 mb-2">Chroma Key (Green Screen)</div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    {selectedClipAsset?.kind === 'image'
+                      ? 'Chroma Key (Green Screen / Image Background Removal)'
+                      : 'Chroma Key (Green Screen)'}
+                  </div>
                   <div className="grid gap-2">
+                    {selectedClipAsset?.kind === 'image' && (
+                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100/90">
+                        Image clips use the same chroma-key controls and renderer path as video clips.
+                      </div>
+                    )}
                     <div className="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/10">
                       <div className="text-xs text-slate-200">Enable</div>
                       <Switch
-                        checked={Boolean(selectedOverlay.chromaKey?.enabled)}
-                        onCheckedChange={(value) => onOverlayRegionChange(selectedOverlay.id, {
+                        checked={Boolean(selectedClip.chromaKey?.enabled)}
+                        onCheckedChange={(value) => onClipChange(selectedClip.id, {
                           chromaKey: {
                             enabled: Boolean(value),
-                            color: selectedOverlay.chromaKey?.color ?? '#00ff00',
-                            threshold: selectedOverlay.chromaKey?.threshold ?? 0.35,
-                            softness: selectedOverlay.chromaKey?.softness ?? 0.15,
+                            color: selectedClip.chromaKey?.color ?? '#00ff00',
+                            threshold: selectedClip.chromaKey?.threshold ?? 0.35,
+                            softness: selectedClip.chromaKey?.softness ?? 0.15,
                           },
                         })}
                         className="data-[state=checked]:bg-[#34B27B]"
@@ -1423,28 +1737,28 @@ export function SettingsPanel({
                         <div className="text-[10px] text-slate-400 mb-1">Key Color</div>
                         <input
                           type="color"
-                          value={selectedOverlay.chromaKey?.color ?? '#00ff00'}
-                          onChange={(e) => onOverlayRegionChange(selectedOverlay.id, {
+                          value={selectedClip.chromaKey?.color ?? '#00ff00'}
+                          onChange={(e) => onClipChange(selectedClip.id, {
                             chromaKey: {
-                              enabled: selectedOverlay.chromaKey?.enabled ?? false,
+                              enabled: selectedClip.chromaKey?.enabled ?? false,
                               color: e.target.value,
-                              threshold: selectedOverlay.chromaKey?.threshold ?? 0.35,
-                              softness: selectedOverlay.chromaKey?.softness ?? 0.15,
+                              threshold: selectedClip.chromaKey?.threshold ?? 0.35,
+                              softness: selectedClip.chromaKey?.softness ?? 0.15,
                             },
                           })}
                           className="w-full h-8 rounded bg-transparent border border-white/10"
                         />
                       </div>
                       <div className="p-2 rounded-lg bg-white/5 border border-white/10">
-                        <div className="text-[10px] text-slate-400 mb-1">Threshold: {Math.round((selectedOverlay.chromaKey?.threshold ?? 0.35) * 100)}%</div>
+                        <div className="text-[10px] text-slate-400 mb-1">Threshold: {Math.round((selectedClip.chromaKey?.threshold ?? 0.35) * 100)}%</div>
                         <Slider
-                          value={[selectedOverlay.chromaKey?.threshold ?? 0.35]}
-                          onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, {
+                          value={[selectedClip.chromaKey?.threshold ?? 0.35]}
+                          onValueChange={(values) => onClipChange(selectedClip.id, {
                             chromaKey: {
-                              enabled: selectedOverlay.chromaKey?.enabled ?? false,
-                              color: selectedOverlay.chromaKey?.color ?? '#00ff00',
+                              enabled: selectedClip.chromaKey?.enabled ?? false,
+                              color: selectedClip.chromaKey?.color ?? '#00ff00',
                               threshold: values[0],
-                              softness: selectedOverlay.chromaKey?.softness ?? 0.15,
+                              softness: selectedClip.chromaKey?.softness ?? 0.15,
                             },
                           })}
                           min={0}
@@ -1454,19 +1768,19 @@ export function SettingsPanel({
                         />
                       </div>
                     </div>
-                    <div className="p-2 rounded-lg bg-white/5 border border-white/10">
-                      <div className="text-[10px] text-slate-400 mb-1">Softness: {Math.round((selectedOverlay.chromaKey?.softness ?? 0.15) * 100)}%</div>
-                      <Slider
-                        value={[selectedOverlay.chromaKey?.softness ?? 0.15]}
-                        onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, {
-                          chromaKey: {
-                            enabled: selectedOverlay.chromaKey?.enabled ?? false,
-                            color: selectedOverlay.chromaKey?.color ?? '#00ff00',
-                            threshold: selectedOverlay.chromaKey?.threshold ?? 0.35,
-                            softness: values[0],
-                          },
-                        })}
-                        min={0}
+                      <div className="p-2 rounded-lg bg-white/5 border border-white/10">
+                        <div className="text-[10px] text-slate-400 mb-1">Softness: {Math.round((selectedClip.chromaKey?.softness ?? 0.15) * 100)}%</div>
+                        <Slider
+                          value={[selectedClip.chromaKey?.softness ?? 0.15]}
+                          onValueChange={(values) => onClipChange(selectedClip.id, {
+                            chromaKey: {
+                              enabled: selectedClip.chromaKey?.enabled ?? false,
+                              color: selectedClip.chromaKey?.color ?? '#00ff00',
+                              threshold: selectedClip.chromaKey?.threshold ?? 0.35,
+                              softness: values[0],
+                            },
+                          })}
+                          min={0}
                         max={1}
                         step={0.01}
                         className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
@@ -1480,8 +1794,8 @@ export function SettingsPanel({
                     <div>
                       <div className="text-[10px] text-slate-500 mb-1">Enter Effect</div>
                       <Select
-                        value={selectedOverlay.enterEffect ?? 'none'}
-                        onValueChange={(value) => onOverlayRegionChange(selectedOverlay.id, { enterEffect: value as OverlayEffect })}
+                        value={selectedClip.enterEffect ?? 'none'}
+                        onValueChange={(value) => onClipChange(selectedClip.id, { enterEffect: value as VideoClipEffect })}
                       >
                         <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-8 text-xs">
                           <SelectValue placeholder="None" />
@@ -1490,14 +1804,18 @@ export function SettingsPanel({
                           <SelectItem value="none">None</SelectItem>
                           <SelectItem value="fade">Fade</SelectItem>
                           <SelectItem value="pixel">Pixel</SelectItem>
+                          <SelectItem value="slide-left">Slide From Left</SelectItem>
+                          <SelectItem value="slide-right">Slide From Right</SelectItem>
+                          <SelectItem value="slide-up">Slide From Top</SelectItem>
+                          <SelectItem value="slide-down">Slide From Bottom</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <div>
                       <div className="text-[10px] text-slate-500 mb-1">Exit Effect</div>
                       <Select
-                        value={selectedOverlay.exitEffect ?? 'none'}
-                        onValueChange={(value) => onOverlayRegionChange(selectedOverlay.id, { exitEffect: value as OverlayEffect })}
+                        value={selectedClip.exitEffect ?? 'none'}
+                        onValueChange={(value) => onClipChange(selectedClip.id, { exitEffect: value as VideoClipEffect })}
                       >
                         <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-8 text-xs">
                           <SelectValue placeholder="None" />
@@ -1506,18 +1824,22 @@ export function SettingsPanel({
                           <SelectItem value="none">None</SelectItem>
                           <SelectItem value="fade">Fade</SelectItem>
                           <SelectItem value="pixel">Pixel</SelectItem>
+                          <SelectItem value="slide-left">Slide To Left</SelectItem>
+                          <SelectItem value="slide-right">Slide To Right</SelectItem>
+                          <SelectItem value="slide-up">Slide To Top</SelectItem>
+                          <SelectItem value="slide-down">Slide To Bottom</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
-                  {(selectedOverlay.enterEffect !== 'none' || selectedOverlay.exitEffect !== 'none') && (
+                  {(selectedClip.enterEffect !== 'none' || selectedClip.exitEffect !== 'none') && (
                     <div className="grid grid-cols-2 gap-2 mt-2">
-                      {selectedOverlay.enterEffect && selectedOverlay.enterEffect !== 'none' && (
+                      {selectedClip.enterEffect && selectedClip.enterEffect !== 'none' && (
                         <div>
-                          <div className="text-[10px] text-slate-500 mb-1">Fade In: {selectedOverlay.fadeInMs ?? 300}ms</div>
+                          <div className="text-[10px] text-slate-500 mb-1">Enter Duration: {selectedClip.fadeInMs ?? 300}ms</div>
                           <Slider
-                            value={[selectedOverlay.fadeInMs ?? 300]}
-                            onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { fadeInMs: values[0] })}
+                            value={[selectedClip.fadeInMs ?? 300]}
+                            onValueChange={(values) => onClipChange(selectedClip.id, { fadeInMs: values[0] })}
                             min={100}
                             max={1500}
                             step={50}
@@ -1525,12 +1847,12 @@ export function SettingsPanel({
                           />
                         </div>
                       )}
-                      {selectedOverlay.exitEffect && selectedOverlay.exitEffect !== 'none' && (
+                      {selectedClip.exitEffect && selectedClip.exitEffect !== 'none' && (
                         <div>
-                          <div className="text-[10px] text-slate-500 mb-1">Fade Out: {selectedOverlay.fadeOutMs ?? 300}ms</div>
+                          <div className="text-[10px] text-slate-500 mb-1">Exit Duration: {selectedClip.fadeOutMs ?? 300}ms</div>
                           <Slider
-                            value={[selectedOverlay.fadeOutMs ?? 300]}
-                            onValueChange={(values) => onOverlayRegionChange(selectedOverlay.id, { fadeOutMs: values[0] })}
+                            value={[selectedClip.fadeOutMs ?? 300]}
+                            onValueChange={(values) => onClipChange(selectedClip.id, { fadeOutMs: values[0] })}
                             min={100}
                             max={1500}
                             step={50}
@@ -1541,57 +1863,82 @@ export function SettingsPanel({
                     </div>
                   )}
                 </div>
-              </div>
               <p className="text-[11px] text-slate-500">
                 Adjust crop to show only a portion of the source video.
               </p>
             </div>
           )}
-          <div className="grid gap-2">
-            {overlayAssets.length === 0 ? (
-              <div className="text-xs text-slate-500 text-center py-6 border border-dashed border-white/10 rounded-xl">
-                No overlay videos yet
-              </div>
-            ) : (
-              overlayAssets.map((asset) => (
-                <div
-                  key={asset.id}
-                  className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-3"
-                  draggable
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData('application/x-overlay-asset', asset.id);
-                    event.dataTransfer.effectAllowed = 'copy';
-                  }}
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs text-slate-200 truncate">{asset.name}</div>
-                    <div className="text-[10px] text-slate-500">
-                      {(asset.durationMs / 1000).toFixed(1)}s
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-slate-200 hover:text-white hover:bg-white/10"
-                      onClick={() => onOverlayAddToTimeline?.(asset.id)}
-                    >
-                      Add
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"
-                      onClick={() => onOverlayAssetRemove?.(asset.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
+        </TabsContent>
+        <TabsContent value="export" className="mt-0 space-y-4">
+          <div className="pt-1">
+            <div className="mb-2 text-xs font-medium text-slate-400">Export Quality</div>
+            <div className="mb-2.5 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-3 h-auto rounded-xl">
+              <button
+                onClick={() => onExportQualityChange?.('medium')}
+                className={cn(
+                  "py-2 rounded-lg transition-all text-xs font-medium",
+                  exportQuality === 'medium'
+                    ? "bg-white text-black"
+                    : "text-slate-400 hover:text-slate-200"
+                )}
+              >
+                Low
+              </button>
+              <button
+                onClick={() => onExportQualityChange?.('good')}
+                className={cn(
+                  "py-2 rounded-lg transition-all text-xs font-medium",
+                  exportQuality === 'good'
+                    ? "bg-white text-black"
+                    : "text-slate-400 hover:text-slate-200"
+                )}
+              >
+                Medium
+              </button>
+              <button
+                onClick={() => onExportQualityChange?.('source')}
+                className={cn(
+                  "py-2 rounded-lg transition-all text-xs font-medium",
+                  exportQuality === 'source'
+                    ? "bg-white text-black"
+                    : "text-slate-400 hover:text-slate-200"
+                )}
+              >
+                High
+              </button>
+            </div>
+
+            <Button
+              type="button"
+              size="lg"
+              onClick={onExport}
+              className="w-full py-6 text-lg font-semibold flex items-center justify-center gap-3 bg-[#34B27B] text-white rounded-xl shadow-lg shadow-[#34B27B]/20 hover:bg-[#34B27B]/90 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
+            >
+              <Download className="w-5 h-5" />
+              <span>Export Video</span>
+            </Button>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  window.electronAPI?.openExternalUrl('https://github.com/siddharthvaddem/openscreen/issues/new/choose');
+                }}
+                className="flex-1 flex items-center justify-center gap-2 text-xs py-2"
+              >
+                <Bug className="w-3 h-3 text-[#34B27B]" />
+                <span>Report a Bug</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  window.electronAPI?.openExternalUrl('https://github.com/siddharthvaddem/openscreen');
+                }}
+                className="flex-1 flex items-center justify-center gap-2 text-xs"
+              >
+                <Star className="w-3 h-3 text-yellow-400" />
+                <span>Star on GitHub</span>
+              </button>
+            </div>
           </div>
         </TabsContent>
       </Tabs>

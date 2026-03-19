@@ -1,0 +1,1 @@
+export const TIMELINE_SIDEBAR_WIDTH = 176;

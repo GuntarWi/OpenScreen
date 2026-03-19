@@ -34,8 +34,10 @@ interface Window {
     storeCursorData: (videoPath: string, cursorData: unknown) => Promise<{ success: boolean; path?: string; message?: string; error?: string }>
     loadCursorData: (videoPath: string) => Promise<{ success: boolean; path?: string; data?: string; message?: string; error?: string }>
     getRecordedVideoPath: () => Promise<{ success: boolean; path?: string; message?: string }>
+    getAssetBasePath: () => Promise<string | null>
     setRecordingState: (recording: boolean) => Promise<void>
     onStopRecordingFromTray: (callback: () => void) => () => void
+    onGlobalMouseMove: (callback: (event: { screenX: number; screenY: number; timestamp: number }) => void) => () => void
     openExternalUrl: (url: string) => Promise<{ success: boolean; error?: string }>
     saveExportedVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{ success: boolean; path?: string; message?: string; cancelled?: boolean }>
     openVideoFilePicker: () => Promise<{ success: boolean; path?: string; cancelled?: boolean }>
@@ -47,6 +49,18 @@ interface Window {
     getCurrentVideoPath: () => Promise<{ success: boolean; path?: string }>
     clearCurrentVideoPath: () => Promise<{ success: boolean }>
     getPlatform: () => Promise<string>
+    getSourceBounds: () => Promise<{
+      success: boolean
+      bounds?: {
+        x: number
+        y: number
+        width: number
+        height: number
+      }
+      scaleFactor?: number
+      message?: string
+      error?: string
+    }>
     hudOverlayHide: () => void;
     hudOverlayClose: () => void;
     saveProject: (projectData: string, suggestedFileName: string) => Promise<{

@@ -2,17 +2,19 @@ import { useCallback } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { TimelineContext } from "dnd-timeline";
 import type { DragEndEvent, Range, ResizeEndEvent, Span } from "dnd-timeline";
+import { closestCenter } from "@dnd-kit/core";
 
 interface TimelineWrapperProps {
   children: ReactNode;
   range: Range;
   videoDuration: number;
-  hasOverlap: (newSpan: Span, excludeId?: string) => boolean;
+  hasOverlap: (newSpan: Span, excludeId?: string, targetRowId?: string | null) => boolean;
   onRangeChange: Dispatch<SetStateAction<Range>>;
   minItemDurationMs: number;
   minVisibleRangeMs: number;
   gridSizeMs: number;
   onItemSpanChange: (id: string, span: Span) => void;
+  onItemDrop?: (activeId: string, overId: string | null) => void;
 }
 
 export default function TimelineWrapper({
@@ -23,9 +25,11 @@ export default function TimelineWrapper({
   onRangeChange,
   minItemDurationMs,
   minVisibleRangeMs,
-  gridSizeMs: _gridSizeMs,
+  gridSizeMs,
   onItemSpanChange,
+  onItemDrop,
 }: TimelineWrapperProps) {
+  void gridSizeMs;
   const totalMs = Math.max(0, Math.round(videoDuration * 1000));
 
   const clampSpanToBounds = useCallback(
@@ -96,7 +100,7 @@ export default function TimelineWrapper({
         return;
       }
       
-      if (hasOverlap(clampedSpan, activeItemId)) {
+      if (hasOverlap(clampedSpan, activeItemId, null)) {
         return;
       }
 
@@ -107,20 +111,27 @@ export default function TimelineWrapper({
 
   const onDragEnd = useCallback(
     (event: DragEndEvent) => {
-      const activeRowId = event.over?.id as string;
+      if (Math.abs(event.delta.x) < 4 && Math.abs(event.delta.y) < 4) return;
+
       const updatedSpan = event.active.data.current.getSpanFromDragEvent?.(event);
-      if (!updatedSpan || !activeRowId) return;
-      
+      if (!updatedSpan) return;
+
       const activeItemId = event.active.id as string;
+      const activeRowId =
+        (event.over?.data.current?.rowId as string | undefined) ??
+        (event.over?.id as string | undefined);
       const clampedSpan = clampSpanToBounds(updatedSpan);
-      
-      if (hasOverlap(clampedSpan, activeItemId)) {
+
+      if (hasOverlap(clampedSpan, activeItemId, activeRowId ?? null)) {
         return;
       }
 
       onItemSpanChange(activeItemId, clampedSpan);
+      if (activeRowId) {
+        onItemDrop?.(activeItemId, activeRowId);
+      }
     },
-    [clampSpanToBounds, hasOverlap, onItemSpanChange]
+    [clampSpanToBounds, hasOverlap, onItemSpanChange, onItemDrop]
   );
 
   const handleRangeChange = useCallback(
@@ -156,6 +167,7 @@ export default function TimelineWrapper({
       onResizeEnd={onResizeEnd}
       onDragEnd={onDragEnd}
       autoScroll={{ enabled: false }}
+      collisionDetection={closestCenter}
     >
       {children}
     </TimelineContext>
