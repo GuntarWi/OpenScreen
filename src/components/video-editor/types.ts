@@ -113,6 +113,27 @@ export interface VideoAsset {
 
 export const RECORDING_ASSET_ID = 'recording';
 
+export type BackgroundFillKind = 'image' | 'video' | 'color' | 'gradient' | 'preset';
+export type BackgroundFit = 'cover' | 'contain';
+
+export interface BackgroundItem {
+  id: string;
+  trackId?: string;
+  startMs: number;
+  endMs: number;
+  kind: BackgroundFillKind;
+  assetId?: string;
+  value?: string;
+  fit?: BackgroundFit;
+  blurAmount?: number;
+  backdropColor?: string;
+  accentColor?: string;
+  retroGridAngle?: number;
+  retroGridDensity?: number;
+  rippleSpeed?: number;
+  rippleCount?: number;
+}
+
 export type VideoClipFit = 'contain' | 'cover';
 
 export interface VideoClipCrop {
@@ -151,6 +172,29 @@ export interface ClipSpeedPoint {
   speed: number;
 }
 
+export interface ClipTransformKeyframe {
+  id: string;
+  timeMs: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotationDeg?: number;
+  scale?: number;
+  opacity?: number;
+  easingToNext?: ClipTransformEasing;
+  curveToNext?: ClipTransformBezier;
+}
+
+export type ClipTransformEasing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+
+export interface ClipTransformBezier {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 export interface VideoClip {
   id: string;
   trackId?: string;
@@ -177,6 +221,7 @@ export interface VideoClip {
   applyCamera?: boolean;
   playbackRate?: number;
   speedPoints?: ClipSpeedPoint[];
+  transformKeyframes?: ClipTransformKeyframe[];
 }
 
 export interface AudioClip {
@@ -321,6 +366,7 @@ export const DEFAULT_SPEED_REGION: Omit<SpeedRegion, 'id' | 'startMs' | 'endMs'>
 };
 
 export type TimelineTrackType =
+  | 'background'
   | 'recording'
   | 'generic'
   | 'video'
@@ -333,6 +379,7 @@ export type TimelineTrackType =
   | 'speed';
 
 export type TimelineTrackItemType =
+  | 'background'
   | 'mixed'
   | 'videoClip'
   | 'audioClip'

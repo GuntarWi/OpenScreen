@@ -14,6 +14,7 @@ import {
   ZOOM_DEPTH_SCALES,
   RECORDING_ASSET_ID,
   DEFAULT_CURSOR_STYLE,
+  type BackgroundItem,
   type ZoomRegion,
   type ZoomFocus,
   type ZoomDepth,
@@ -39,9 +40,16 @@ import { applyZoomTransform } from "./videoPlayback/zoomTransform";
 import { createVideoEventHandlers } from "./videoPlayback/videoEventHandlers";
 import { ClipPixiRenderer } from "./videoPlayback/clipPixiRenderer";
 import { type AspectRatio, formatAspectRatioForCSS } from "@/utils/aspectRatioUtils";
+import { RetroGrid } from "@/components/ui/retro-grid";
+import { Ripple } from "@/components/ui/ripple";
 import { AnnotationContentView, AnnotationOverlay } from "./AnnotationOverlay";
 import { ClipVideoItem } from "./ClipVideoItem";
-import { computeEffectState, DEFAULT_EFFECT_STATE, type CombinedEffectState } from "./videoPlayback/effectUtils";
+import {
+  computeEffectState,
+  DEFAULT_EFFECT_STATE,
+  getEffectPreviewFit,
+  type CombinedEffectState,
+} from "./videoPlayback/effectUtils";
 import { getPlaybackRateForSpeedRegions } from "./speedRegionUtils";
 import {
   getClipTimelineDurationMs,
@@ -52,6 +60,24 @@ import {
 import type { InteractionRect } from "@/utils/recordingInteractionLayout";
 import { resolveRecordingVisibleRect } from "@/utils/recordingInteractionLayout";
 import { computeClipLayout } from "@/utils/clipLayout";
+import { resolveClipTransformStateAtTime } from "@/utils/clipTransformKeyframes";
+import {
+  DEFAULT_BACKGROUND_ACCENT_COLOR,
+  DEFAULT_BACKGROUND_BACKDROP_COLOR,
+  DEFAULT_BACKGROUND_VALUE,
+  DEFAULT_RETRO_GRID_ANGLE,
+  DEFAULT_RETRO_GRID_DENSITY,
+  DEFAULT_RIPPLE_COUNT,
+  DEFAULT_RIPPLE_SPEED,
+  getBackgroundItemSource,
+  getRetroGridCellSize,
+  getRippleAnimationDurationSeconds,
+  MAGICUI_RETRO_GRID_VALUE,
+  MAGICUI_RIPPLE_VALUE,
+  resolveActiveBackgroundItem,
+} from "./backgroundUtils";
+
+const PREVIEW_WORKSPACE_SCALE = 0.82;
 
 interface VideoPlaybackProps {
   videoPath: string;
@@ -61,6 +87,7 @@ interface VideoPlaybackProps {
   onPlayStateChange: (playing: boolean) => void;
   onError: (error: string) => void;
   wallpaper?: string;
+  backgroundItems?: BackgroundItem[];
   zoomRegions: ZoomRegion[];
   selectedZoomId: string | null;
   onSelectZoom: (id: string | null) => void;
@@ -69,6 +96,7 @@ interface VideoPlaybackProps {
   showShadow?: boolean;
   shadowIntensity?: number;
   showBlur?: boolean;
+  showSafeFrameOverlay?: boolean;
   motionBlurEnabled?: boolean;
   borderRadius?: number;
   padding?: number;
@@ -124,6 +152,7 @@ function VideoPlayback(
     onPlayStateChange,
     onError,
     wallpaper,
+    backgroundItems = [],
     zoomRegions,
     selectedZoomId,
     onSelectZoom,
@@ -132,6 +161,7 @@ function VideoPlayback(
     showShadow,
     shadowIntensity = 0,
     showBlur,
+    showSafeFrameOverlay = false,
     motionBlurEnabled = true,
     borderRadius = 0,
     padding = 50,
@@ -168,16 +198,20 @@ function VideoPlayback(
   ref: React.Ref<VideoPlaybackRef>
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const workspaceViewportRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const videoSpriteRef = useRef<Sprite | null>(null);
   const videoContainerRef = useRef<Container | null>(null);
+  const workspaceContainerRef = useRef<Container | null>(null);
   const cameraContainerRef = useRef<Container | null>(null);
   const timeUpdateAnimationRef = useRef<number | null>(null);
   const [pixiReady, setPixiReady] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const clipVideoLayerRef = useRef<HTMLDivElement | null>(null);
+  const stageFrameRef = useRef<HTMLDivElement | null>(null);
+  const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
   const screenGroupRef = useRef<HTMLDivElement | null>(null);
   const midgroundRef = useRef<HTMLDivElement | null>(null);
   const focusIndicatorRef = useRef<HTMLDivElement | null>(null);
@@ -205,6 +239,7 @@ function VideoPlayback(
   const blurFilterRef = useRef<BlurFilter | null>(null);
   const isDraggingFocusRef = useRef(false);
   const stageSizeRef = useRef({ width: 0, height: 0 });
+  const stageOffsetRef = useRef({ x: 0, y: 0 });
   const videoSizeRef = useRef({ width: 0, height: 0 });
   const baseScaleRef = useRef(1);
   const baseOffsetRawRef = useRef({ x: 0, y: 0 });
@@ -226,10 +261,35 @@ function VideoPlayback(
   const lastTickTimeMsRef = useRef<number | null>(null);
   const seekSnapUntilRef = useRef(0);
   const overlayDebugStateRef = useRef<Map<string, boolean>>(new Map());
+  const workspacePanSessionRef = useRef<{ pointerId: number; startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
+  const activePointerPositionsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchSessionRef = useRef<{
+    pointerA: number;
+    pointerB: number;
+    startDistance: number;
+    startZoom: number;
+    startPanX: number;
+    startPanY: number;
+    startCenterX: number;
+    startCenterY: number;
+  } | null>(null);
+  const [previewStageRect, setPreviewStageRect] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [workspaceView, setWorkspaceView] = useState({ zoom: 1, panX: 0, panY: 0, panMode: false });
+  const workspaceViewRef = useRef(workspaceView);
+  const [isWorkspacePanning, setIsWorkspacePanning] = useState(false);
+  const [spacePanActive, setSpacePanActive] = useState(false);
+  const [workspaceHovered, setWorkspaceHovered] = useState(false);
+  const [workspaceFocused, setWorkspaceFocused] = useState(false);
 
   const CURSOR_TRAIL_MS = 500;
   const CURSOR_CLICK_MS = 280;
   const RAD_TO_DEG = 180 / Math.PI;
+  const previewWorkspaceScale = showSafeFrameOverlay ? PREVIEW_WORKSPACE_SCALE : 1;
+  const WORKSPACE_ZOOM_MIN = 1;
+  const WORKSPACE_ZOOM_MAX = 4;
+  const workspacePanEnabled = workspaceView.panMode || spacePanActive;
+  const workspaceViewActive = workspaceView.zoom > 1.001 || Math.abs(workspaceView.panX) > 0.5 || Math.abs(workspaceView.panY) > 0.5;
+  const workspaceInteractionLocked = workspaceViewActive || workspacePanEnabled || isWorkspacePanning;
 
   // DEBUG: Temporarily enabled by default for clip position debugging
   // Set window.__openscreen_debugClips = false to disable (legacy: __openscreen_debugOverlay)
@@ -300,6 +360,329 @@ function VideoPlayback(
     // Always use console.log so logs are visible (console.debug is often filtered)
     logOverlayDebugExpanded('[Clip Debug][preview]', { kind, ...payload });
   }, [getOverlayDebugMode, logOverlayDebugExpanded]);
+
+  useEffect(() => {
+    workspaceViewRef.current = workspaceView;
+  }, [workspaceView]);
+
+  const clampWorkspacePan = useCallback((panX: number, panY: number, zoom: number) => {
+    const viewport = workspaceViewportRef.current;
+    if (!viewport) {
+      return { panX, panY };
+    }
+
+    const width = viewport.clientWidth || 0;
+    const height = viewport.clientHeight || 0;
+    const baseMarginRatio = showSafeFrameOverlay ? 0.32 : 0.14;
+    const maxPanX = width * Math.max(baseMarginRatio, Math.max(0, zoom - 1) * 0.5);
+    const maxPanY = height * Math.max(baseMarginRatio, Math.max(0, zoom - 1) * 0.5);
+
+    return {
+      panX: Math.max(-maxPanX, Math.min(maxPanX, panX)),
+      panY: Math.max(-maxPanY, Math.min(maxPanY, panY)),
+    };
+  }, [showSafeFrameOverlay]);
+
+  const updateWorkspaceView = useCallback((updater: (prev: typeof workspaceView) => typeof workspaceView) => {
+    setWorkspaceView((prev) => {
+      const next = updater(prev);
+      const zoom = Math.max(WORKSPACE_ZOOM_MIN, Math.min(WORKSPACE_ZOOM_MAX, next.zoom));
+      const clampedPan = clampWorkspacePan(next.panX, next.panY, zoom);
+      return {
+        ...next,
+        zoom,
+        panX: clampedPan.panX,
+        panY: clampedPan.panY,
+      };
+    });
+  }, [WORKSPACE_ZOOM_MAX, WORKSPACE_ZOOM_MIN, clampWorkspacePan]);
+
+  const zoomWorkspaceTo = useCallback((targetZoom: number, clientX?: number, clientY?: number) => {
+    const viewport = workspaceViewportRef.current;
+    updateWorkspaceView((prev) => {
+      const nextZoom = Math.max(WORKSPACE_ZOOM_MIN, Math.min(WORKSPACE_ZOOM_MAX, Number(targetZoom.toFixed(3))));
+      if (!viewport || nextZoom === prev.zoom || clientX == null || clientY == null) {
+        return {
+          ...prev,
+          zoom: nextZoom,
+        };
+      }
+
+      const rect = viewport.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      const localX = clientX - rect.left;
+      const localY = clientY - rect.top;
+      const offsetX = localX - centerX;
+      const offsetY = localY - centerY;
+      const nextPanX = offsetX - ((offsetX - prev.panX) / prev.zoom) * nextZoom;
+      const nextPanY = offsetY - ((offsetY - prev.panY) / prev.zoom) * nextZoom;
+
+      return {
+        ...prev,
+        zoom: nextZoom,
+        panX: nextPanX,
+        panY: nextPanY,
+      };
+    });
+  }, [WORKSPACE_ZOOM_MAX, WORKSPACE_ZOOM_MIN, updateWorkspaceView]);
+
+  const resetWorkspaceView = useCallback(() => {
+    setWorkspaceView((prev) => ({
+      ...prev,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      panMode: false,
+    }));
+    setIsWorkspacePanning(false);
+    workspacePanSessionRef.current = null;
+  }, []);
+
+  const zoomWorkspaceBy = useCallback((direction: 1 | -1) => {
+    const currentZoom = workspaceViewRef.current.zoom;
+    const nextZoom = direction > 0 ? currentZoom * 1.2 : currentZoom / 1.2;
+    zoomWorkspaceTo(nextZoom);
+  }, [zoomWorkspaceTo]);
+
+  const toggleWorkspacePanMode = useCallback(() => {
+    setWorkspaceView((prev) => ({ ...prev, panMode: !prev.panMode }));
+    setIsWorkspacePanning(false);
+    workspacePanSessionRef.current = null;
+    pinchSessionRef.current = null;
+  }, []);
+
+  const handleWorkspacePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof HTMLElement)) return;
+    if (event.target.closest('[data-workspace-controls="true"]')) return;
+    event.currentTarget.focus();
+
+    activePointerPositionsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (event.pointerType === 'touch') {
+      const activePointers = Array.from(activePointerPositionsRef.current.entries());
+      if (activePointers.length === 2) {
+        const [[pointerA, pointA], [pointerB, pointB]] = activePointers;
+        const dx = pointB.x - pointA.x;
+        const dy = pointB.y - pointA.y;
+        const distance = Math.hypot(dx, dy);
+        pinchSessionRef.current = {
+          pointerA,
+          pointerB,
+          startDistance: Math.max(1, distance),
+          startZoom: workspaceViewRef.current.zoom,
+          startPanX: workspaceViewRef.current.panX,
+          startPanY: workspaceViewRef.current.panY,
+          startCenterX: (pointA.x + pointB.x) / 2,
+          startCenterY: (pointA.y + pointB.y) / 2,
+        };
+        workspacePanSessionRef.current = null;
+        setIsWorkspacePanning(false);
+        event.preventDefault();
+        return;
+      }
+    }
+
+    if (!workspacePanEnabled) return;
+
+    workspacePanSessionRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startPanX: workspaceViewRef.current.panX,
+      startPanY: workspaceViewRef.current.panY,
+    };
+    setIsWorkspacePanning(true);
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [workspacePanEnabled]);
+
+  const handleWorkspacePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointerPositionsRef.current.has(event.pointerId)) {
+      activePointerPositionsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+
+    const pinchSession = pinchSessionRef.current;
+    if (
+      pinchSession &&
+      activePointerPositionsRef.current.has(pinchSession.pointerA) &&
+      activePointerPositionsRef.current.has(pinchSession.pointerB)
+    ) {
+      const pointA = activePointerPositionsRef.current.get(pinchSession.pointerA);
+      const pointB = activePointerPositionsRef.current.get(pinchSession.pointerB);
+      if (pointA && pointB) {
+        const dx = pointB.x - pointA.x;
+        const dy = pointB.y - pointA.y;
+        const distance = Math.max(1, Math.hypot(dx, dy));
+        const centerX = (pointA.x + pointB.x) / 2;
+        const centerY = (pointA.y + pointB.y) / 2;
+        const viewport = workspaceViewportRef.current;
+        const rect = viewport?.getBoundingClientRect();
+        if (rect) {
+          const nextZoom = Math.max(
+            WORKSPACE_ZOOM_MIN,
+            Math.min(WORKSPACE_ZOOM_MAX, pinchSession.startZoom * (distance / pinchSession.startDistance)),
+          );
+          const stageCenterX = rect.width / 2;
+          const stageCenterY = rect.height / 2;
+          const startOffsetX = pinchSession.startCenterX - rect.left - stageCenterX;
+          const startOffsetY = pinchSession.startCenterY - rect.top - stageCenterY;
+          const currentOffsetX = centerX - rect.left - stageCenterX;
+          const currentOffsetY = centerY - rect.top - stageCenterY;
+          const worldX = (startOffsetX - pinchSession.startPanX) / pinchSession.startZoom;
+          const worldY = (startOffsetY - pinchSession.startPanY) / pinchSession.startZoom;
+
+          updateWorkspaceView((prev) => ({
+            ...prev,
+            zoom: nextZoom,
+            panX: currentOffsetX - worldX * nextZoom,
+            panY: currentOffsetY - worldY * nextZoom,
+          }));
+        }
+        event.preventDefault();
+      }
+      return;
+    }
+
+    const session = workspacePanSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - session.startX;
+    const deltaY = event.clientY - session.startY;
+    updateWorkspaceView((prev) => ({
+      ...prev,
+      panX: session.startPanX + deltaX,
+      panY: session.startPanY + deltaY,
+    }));
+  }, [WORKSPACE_ZOOM_MAX, WORKSPACE_ZOOM_MIN, updateWorkspaceView]);
+
+  const endWorkspacePan = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
+    const session = workspacePanSessionRef.current;
+    if (event && session && session.pointerId === event.pointerId) {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // ignore pointer capture cleanup failures
+      }
+    }
+    if (event) {
+      activePointerPositionsRef.current.delete(event.pointerId);
+      const pinchSession = pinchSessionRef.current;
+      if (pinchSession && (pinchSession.pointerA === event.pointerId || pinchSession.pointerB === event.pointerId)) {
+        pinchSessionRef.current = null;
+      }
+    }
+    workspacePanSessionRef.current = null;
+    setIsWorkspacePanning(false);
+  }, []);
+
+  const handleWorkspaceWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof HTMLElement)) return;
+    if (event.target.closest('[data-workspace-controls="true"]')) return;
+
+    event.preventDefault();
+    event.currentTarget.focus();
+
+    const intensity = event.ctrlKey ? 0.0035 : 0.0018;
+    const zoomFactor = Math.exp(-event.deltaY * intensity);
+    zoomWorkspaceTo(workspaceViewRef.current.zoom * zoomFactor, event.clientX, event.clientY);
+  }, [zoomWorkspaceTo]);
+
+  useEffect(() => {
+    const hotkeysEnabled = workspaceHovered || workspaceFocused || workspacePanEnabled || isWorkspacePanning;
+    if (!hotkeysEnabled) return;
+
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+
+      if (event.code === 'Space') {
+        if (!spacePanActive) {
+          setSpacePanActive(true);
+        }
+        event.preventDefault();
+        return;
+      }
+
+      if (event.key === '0') {
+        resetWorkspaceView();
+        event.preventDefault();
+        return;
+      }
+
+      if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') {
+        zoomWorkspaceBy(1);
+        event.preventDefault();
+        return;
+      }
+
+      if (event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract') {
+        zoomWorkspaceBy(-1);
+        event.preventDefault();
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') {
+        setSpacePanActive(false);
+      }
+    };
+
+    const handleWindowBlur = () => {
+      setSpacePanActive(false);
+      workspacePanSessionRef.current = null;
+      pinchSessionRef.current = null;
+      activePointerPositionsRef.current.clear();
+      setIsWorkspacePanning(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [
+    isWorkspacePanning,
+    resetWorkspaceView,
+    spacePanActive,
+    workspaceFocused,
+    workspaceHovered,
+    workspacePanEnabled,
+    zoomWorkspaceBy,
+  ]);
+
+  useEffect(() => {
+    const viewport = workspaceViewportRef.current;
+    if (!viewport || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      setWorkspaceView((prev) => {
+        const clampedPan = clampWorkspacePan(prev.panX, prev.panY, prev.zoom);
+        if (Math.abs(clampedPan.panX - prev.panX) < 0.5 && Math.abs(clampedPan.panY - prev.panY) < 0.5) {
+          return prev;
+        }
+        return {
+          ...prev,
+          panX: clampedPan.panX,
+          panY: clampedPan.panY,
+        };
+      });
+    });
+
+    observer.observe(viewport);
+    return () => {
+      observer.disconnect();
+    };
+  }, [clampWorkspacePan]);
 
   const cancelExtendedPlayback = useCallback(() => {
     extendedPlaybackRef.current = false;
@@ -379,6 +762,7 @@ function VideoPlayback(
     if (!group) return;
 
     if (!state.active) {
+      group.style.transformOrigin = "";
       group.style.transform = '';
       return;
     }
@@ -390,6 +774,17 @@ function VideoPlayback(
     const scale = state.scale ?? 1;
     const offsetX = state.offsetX ?? 0;
     const offsetY = state.offsetY ?? 0;
+    const stageWidth = previewStageRect.width || stageSizeRef.current.width;
+    const stageHeight = previewStageRect.height || stageSizeRef.current.height;
+    const stageOffsetX = previewStageRect.x || stageOffsetRef.current.x;
+    const stageOffsetY = previewStageRect.y || stageOffsetRef.current.y;
+    const viewportWidth = workspaceViewportRef.current?.clientWidth || stageWidth;
+    const viewportHeight = workspaceViewportRef.current?.clientHeight || stageHeight;
+    const fit = stageWidth > 0 && stageHeight > 0
+      ? getEffectPreviewFit(state, stageWidth, stageHeight, viewportWidth, viewportHeight, 18)
+      : { fitScale: 1, translateX: 0, translateY: 0 };
+    const transformOriginX = stageOffsetX + stageWidth / 2;
+    const transformOriginY = stageOffsetY + stageHeight / 2;
 
     try {
       const m = new DOMMatrix();
@@ -406,14 +801,14 @@ function VideoPlayback(
         m.m41, m.m42, m.m43, m.m44,
       ];
 
-      group.style.transformOrigin = '50% 50%';
-      group.style.transform = `matrix3d(${values.join(',')})`;
+      group.style.transformOrigin = `${transformOriginX}px ${transformOriginY}px`;
+      group.style.transform = `scale(${fit.fitScale}) translate3d(${fit.translateX}px, ${fit.translateY}px, 0) matrix3d(${values.join(',')})`;
     } catch {
       // Fallback if DOMMatrix is unavailable
-      group.style.transformOrigin = '50% 50%';
-      group.style.transform = `perspective(${perspective}px) translate3d(${offsetX}px, ${offsetY}px, 0) rotateX(${rotXDeg}deg) rotateY(${rotYDeg}deg) rotate(${rollDeg}deg) scale(${scale})`;
+      group.style.transformOrigin = `${transformOriginX}px ${transformOriginY}px`;
+      group.style.transform = `scale(${fit.fitScale}) translate3d(${fit.translateX}px, ${fit.translateY}px, 0) perspective(${perspective}px) translate3d(${offsetX}px, ${offsetY}px, 0) rotateX(${rotXDeg}deg) rotateY(${rotYDeg}deg) rotate(${rollDeg}deg) scale(${scale})`;
     }
-  }, [RAD_TO_DEG]);
+  }, [RAD_TO_DEG, previewStageRect]);
 
   const applyZoomToOverlays = useCallback(() => {
     const overlayLayer = clipVideoLayerRef.current;
@@ -583,16 +978,20 @@ function VideoPlayback(
     const height = stageHeight ?? stageSizeRef.current.height;
     const offsetX = width ? ((screenOffset?.x ?? 0) / 100) * width : 0;
     const offsetY = height ? ((screenOffset?.y ?? 0) / 100) * height : 0;
+    const stageOffset = stageOffsetRef.current;
 
     screenOffsetPxRef.current = { x: offsetX, y: offsetY };
 
     const baseOffset = baseOffsetRawRef.current;
-    baseOffsetRef.current = { x: baseOffset.x + offsetX, y: baseOffset.y + offsetY };
+    baseOffsetRef.current = {
+      x: stageOffset.x + baseOffset.x + offsetX,
+      y: stageOffset.y + baseOffset.y + offsetY,
+    };
 
     const baseMask = baseMaskRawRef.current;
     baseMaskRef.current = {
-      x: baseMask.x + offsetX,
-      y: baseMask.y + offsetY,
+      x: stageOffset.x + baseMask.x + offsetX,
+      y: stageOffset.y + baseMask.y + offsetY,
       width: baseMask.width,
       height: baseMask.height,
     };
@@ -656,9 +1055,8 @@ function VideoPlayback(
       return;
     }
 
-    // Update stage size from overlay dimensions
-    const stageWidth = overlayEl.clientWidth;
-    const stageHeight = overlayEl.clientHeight;
+    const stageWidth = stageSizeRef.current.width;
+    const stageHeight = stageSizeRef.current.height;
     if (stageWidth && stageHeight) {
       stageSizeRef.current = { width: stageWidth, height: stageHeight };
     }
@@ -666,6 +1064,12 @@ function VideoPlayback(
     updateOverlayIndicator({
       overlayEl,
       indicatorEl,
+      stageRect: {
+        x: stageOffsetRef.current.x,
+        y: stageOffsetRef.current.y,
+        width: stageWidth,
+        height: stageHeight,
+      },
       region,
       focusOverride,
       videoSize: videoSizeRef.current,
@@ -681,8 +1085,9 @@ function VideoPlayback(
     const maskGraphics = maskGraphicsRef.current;
     const videoElement = videoRef.current;
     const cameraContainer = cameraContainerRef.current;
+    const workspaceContainer = workspaceContainerRef.current;
 
-    if (!container || !app || !videoSprite || !maskGraphics || !videoElement || !cameraContainer) {
+    if (!container || !app || !videoSprite || !maskGraphics || !videoElement || !cameraContainer || !workspaceContainer) {
       return;
     }
 
@@ -704,15 +1109,34 @@ function VideoPlayback(
       lockedVideoDimensions: lockedVideoDimensionsRef.current,
       borderRadius,
       padding,
+      workspaceScale: previewWorkspaceScale,
     });
 
     if (result) {
       stageSizeRef.current = result.stageSize;
+      stageOffsetRef.current = result.stageOffset;
       videoSizeRef.current = result.videoSize;
       baseScaleRef.current = result.baseScale;
       baseOffsetRawRef.current = result.baseOffset;
       baseMaskRawRef.current = result.maskRect;
       cropBoundsRef.current = result.cropBounds;
+      workspaceContainer.position.set(result.stageOffset.x, result.stageOffset.y);
+      setPreviewStageRect((current) => {
+        if (
+          Math.abs(current.x - result.stageOffset.x) < 0.5 &&
+          Math.abs(current.y - result.stageOffset.y) < 0.5 &&
+          Math.abs(current.width - result.stageSize.width) < 0.5 &&
+          Math.abs(current.height - result.stageSize.height) < 0.5
+        ) {
+          return current;
+        }
+        return {
+          x: result.stageOffset.x,
+          y: result.stageOffset.y,
+          width: result.stageSize.width,
+          height: result.stageSize.height,
+        };
+      });
 
       // Reset camera container to identity
       cameraContainer.scale.set(1);
@@ -746,7 +1170,16 @@ function VideoPlayback(
         });
       }
     }
-  }, [updateOverlayForRegion, cropRegion, borderRadius, padding, updateScreenOffsetRefs, applyScreenOffsetToVideo, applyScreenOffsetToMidground]);
+  }, [
+    updateOverlayForRegion,
+    cropRegion,
+    borderRadius,
+    padding,
+    previewWorkspaceScale,
+    updateScreenOffsetRefs,
+    applyScreenOffsetToVideo,
+    applyScreenOffsetToMidground,
+  ]);
 
   useEffect(() => {
     layoutVideoContentRef.current = layoutVideoContent;
@@ -835,7 +1268,7 @@ function VideoPlayback(
     videoSprite: videoSpriteRef.current,
     videoContainer: videoContainerRef.current,
     containerRef,
-    clipContainerRef: clipVideoLayerRef,
+    clipContainerRef: stageFrameRef,
     play: async () => {
       const vid = videoRef.current;
       if (!vid) return;
@@ -907,8 +1340,9 @@ function VideoPlayback(
     if (!region) return;
 
     const rect = overlayEl.getBoundingClientRect();
-    const stageWidth = rect.width;
-    const stageHeight = rect.height;
+    const stageWidth = stageSizeRef.current.width;
+    const stageHeight = stageSizeRef.current.height;
+    const stageOffset = stageOffsetRef.current;
 
     if (!stageWidth || !stageHeight) {
       return;
@@ -916,8 +1350,11 @@ function VideoPlayback(
 
     stageSizeRef.current = { width: stageWidth, height: stageHeight };
 
-    const localX = clientX - rect.left;
-    const localY = clientY - rect.top;
+    const localX = clientX - rect.left - stageOffset.x;
+    const localY = clientY - rect.top - stageOffset.y;
+    if (localX < 0 || localY < 0 || localX > stageWidth || localY > stageHeight) {
+      return;
+    }
 
     const unclampedFocus: ZoomFocus = {
       cx: clamp01(localX / stageWidth),
@@ -1304,14 +1741,14 @@ function VideoPlayback(
     const overlayEl = overlayRef.current;
     if (!overlayEl) return;
     const hasInteractiveOverlay = Boolean(selectedZoom || selectedAnnotationId);
-    if (!hasInteractiveOverlay) {
+    if (!hasInteractiveOverlay || workspaceInteractionLocked) {
       overlayEl.style.cursor = 'default';
       overlayEl.style.pointerEvents = 'none';
       return;
     }
     overlayEl.style.cursor = selectedZoom ? (isPlaying ? 'not-allowed' : 'grab') : 'default';
     overlayEl.style.pointerEvents = isPlaying ? 'none' : 'auto';
-  }, [selectedZoom, selectedAnnotationId, isPlaying]);
+  }, [selectedZoom, selectedAnnotationId, isPlaying, workspaceInteractionLocked]);
 
   useEffect(() => {
     if (!pixiReady || !videoReady) return;
@@ -1681,11 +2118,16 @@ function VideoPlayback(
       app.stage.sortableChildren = true;
       container.appendChild(app.canvas);
 
+      const workspaceContainer = new Container();
+      workspaceContainer.sortableChildren = true;
+      workspaceContainerRef.current = workspaceContainer;
+      app.stage.addChild(workspaceContainer);
+
       // Camera container - this will be scaled/positioned for zoom
       const cameraContainer = new Container();
       cameraContainer.sortableChildren = true;
       cameraContainerRef.current = cameraContainer;
-      app.stage.addChild(cameraContainer);
+      workspaceContainer.addChild(cameraContainer);
 
       // Video container - holds the masked video sprite
       const videoContainer = new Container();
@@ -1693,7 +2135,7 @@ function VideoPlayback(
       videoContainerRef.current = videoContainer;
       cameraContainer.addChild(videoContainer);
 
-      const clipRenderer = new ClipPixiRenderer(app.stage);
+      const clipRenderer = new ClipPixiRenderer(workspaceContainer);
       clipRenderer.setZIndex(1);
       clipRenderer.setAssets(videoAssetsRef.current);
       clipRenderer.syncClips(videoClipsRef.current);
@@ -1714,6 +2156,7 @@ function VideoPlayback(
         app.destroy({ removeView: true });
       }
       appRef.current = null;
+      workspaceContainerRef.current = null;
       cameraContainerRef.current = null;
       videoContainerRef.current = null;
       videoSpriteRef.current = null;
@@ -2279,49 +2722,92 @@ function VideoPlayback(
     videoReadyRafRef.current = requestAnimationFrame(waitForRenderableFrame);
   };
 
-  const [resolvedWallpaper, setResolvedWallpaper] = useState<string | null>(null);
+  const timeMs = Math.round(currentTime * 1000);
+  const activeBackgroundItem = useMemo(
+    () => resolveActiveBackgroundItem(backgroundItems, timeMs),
+    [backgroundItems, timeMs],
+  );
+  const activeBackgroundRawSource = useMemo(
+    () => getBackgroundItemSource(activeBackgroundItem, videoAssets),
+    [activeBackgroundItem, videoAssets],
+  );
+  const activeBackgroundSource = useMemo(
+    () => activeBackgroundRawSource ?? (backgroundItems.length === 0 ? (wallpaper ?? DEFAULT_BACKGROUND_VALUE) : null),
+    [activeBackgroundRawSource, backgroundItems.length, wallpaper],
+  );
+  const activeBackgroundAsset = useMemo(
+    () => (activeBackgroundItem?.assetId ? videoAssets.find((asset) => asset.id === activeBackgroundItem.assetId) ?? null : null),
+    [activeBackgroundItem, videoAssets],
+  );
+  const activeBackgroundDurationMs = useMemo(() => {
+    if (!activeBackgroundItem) {
+      return 0;
+    }
+    if (activeBackgroundAsset?.durationMs && activeBackgroundAsset.durationMs > 0) {
+      return activeBackgroundAsset.durationMs;
+    }
+    return Math.max(0, activeBackgroundItem.endMs - activeBackgroundItem.startMs);
+  }, [activeBackgroundAsset, activeBackgroundItem]);
+  const activeBackgroundFit = activeBackgroundItem?.fit ?? 'cover';
+  const activeBackgroundBlurAmount = activeBackgroundItem?.blurAmount ?? (backgroundItems.length === 0 && showBlur ? 2 : 0);
+  const activeBackgroundBackdropColor = activeBackgroundItem?.backdropColor ?? DEFAULT_BACKGROUND_BACKDROP_COLOR;
+  const activeBackgroundAccentColor = activeBackgroundItem?.accentColor ?? DEFAULT_BACKGROUND_ACCENT_COLOR;
+  const activeRetroGridAngle = activeBackgroundItem?.retroGridAngle ?? DEFAULT_RETRO_GRID_ANGLE;
+  const activeRetroGridDensity = activeBackgroundItem?.retroGridDensity ?? DEFAULT_RETRO_GRID_DENSITY;
+  const activeRippleSpeed = activeBackgroundItem?.rippleSpeed ?? DEFAULT_RIPPLE_SPEED;
+  const activeRippleCount = activeBackgroundItem?.rippleCount ?? DEFAULT_RIPPLE_COUNT;
+  const [resolvedBackgroundSource, setResolvedBackgroundSource] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true
     ;(async () => {
       try {
-        if (!wallpaper) {
-          const def = await getAssetPath('wallpapers/wallpaper1.jpg')
-          if (mounted) setResolvedWallpaper(def)
+        if (!activeBackgroundSource) {
+          if (mounted) setResolvedBackgroundSource(null)
           return
         }
 
-        if (wallpaper.startsWith('#') || wallpaper.startsWith('linear-gradient') || wallpaper.startsWith('radial-gradient')) {
-          if (mounted) setResolvedWallpaper(wallpaper)
+        if (activeBackgroundSource === MAGICUI_RETRO_GRID_VALUE) {
+          if (mounted) setResolvedBackgroundSource(activeBackgroundSource)
+          return
+        }
+
+        if (activeBackgroundSource === MAGICUI_RIPPLE_VALUE) {
+          if (mounted) setResolvedBackgroundSource(activeBackgroundSource)
+          return
+        }
+
+        if (activeBackgroundSource.startsWith('#') || activeBackgroundSource.startsWith('linear-gradient') || activeBackgroundSource.startsWith('radial-gradient')) {
+          if (mounted) setResolvedBackgroundSource(activeBackgroundSource)
           return
         }
 
         // If it's a data URL (custom uploaded image), use as-is
-        if (wallpaper.startsWith('data:')) {
-          if (mounted) setResolvedWallpaper(wallpaper)
+        if (activeBackgroundSource.startsWith('data:')) {
+          if (mounted) setResolvedBackgroundSource(activeBackgroundSource)
           return
         }
 
         // If it's an absolute web/http or file path, use as-is
-        if (wallpaper.startsWith('http') || wallpaper.startsWith('file://') || wallpaper.startsWith('/')) {
+        if (activeBackgroundSource.startsWith('http') || activeBackgroundSource.startsWith('file://') || activeBackgroundSource.startsWith('/')) {
           // If it's an absolute server path (starts with '/'), resolve via getAssetPath as well
-          if (wallpaper.startsWith('/')) {
-            const rel = wallpaper.replace(/^\//, '')
+          if (activeBackgroundSource.startsWith('/')) {
+            const rel = activeBackgroundSource.replace(/^\//, '')
             const p = await getAssetPath(rel)
-            if (mounted) setResolvedWallpaper(p)
+            if (mounted) setResolvedBackgroundSource(p)
             return
           }
-          if (mounted) setResolvedWallpaper(wallpaper)
+          if (mounted) setResolvedBackgroundSource(activeBackgroundSource)
           return
         }
-        const p = await getAssetPath(wallpaper.replace(/^\//, ''))
-        if (mounted) setResolvedWallpaper(p)
+        const p = await getAssetPath(activeBackgroundSource.replace(/^\//, ''))
+        if (mounted) setResolvedBackgroundSource(p)
       } catch (err) {
-        if (mounted) setResolvedWallpaper(wallpaper || '/wallpapers/wallpaper1.jpg')
+        if (mounted) setResolvedBackgroundSource(activeBackgroundSource || null)
       }
     })()
     return () => { mounted = false }
-  }, [wallpaper])
+  }, [activeBackgroundSource])
 
   useEffect(() => {
     return () => {
@@ -2332,16 +2818,75 @@ function VideoPlayback(
     };
   }, [])
 
-  const isImageUrl = Boolean(resolvedWallpaper && (resolvedWallpaper.startsWith('file://') || resolvedWallpaper.startsWith('http') || resolvedWallpaper.startsWith('/') || resolvedWallpaper.startsWith('data:')))
-  const backgroundStyle = isImageUrl
-    ? { backgroundImage: `url(${resolvedWallpaper || ''})` }
-    : { background: resolvedWallpaper || '' };
-
-  const timeMs = Math.round(currentTime * 1000);
   const videoAssetMap = useMemo(
     () => new Map(videoAssets.map((asset) => [asset.id, asset])),
     [videoAssets],
   );
+  const isBackgroundVideo = Boolean(activeBackgroundItem?.kind === 'video' && activeBackgroundRawSource && resolvedBackgroundSource);
+  const isRetroGridBackground = activeBackgroundSource === MAGICUI_RETRO_GRID_VALUE;
+  const isRippleBackground = activeBackgroundSource === MAGICUI_RIPPLE_VALUE;
+  const isImageUrl = Boolean(
+    !isRetroGridBackground &&
+    !isRippleBackground &&
+    !isBackgroundVideo &&
+    resolvedBackgroundSource &&
+    (
+      resolvedBackgroundSource.startsWith('file://') ||
+      resolvedBackgroundSource.startsWith('http') ||
+      resolvedBackgroundSource.startsWith('/') ||
+      resolvedBackgroundSource.startsWith('data:')
+    ),
+  );
+  const backgroundStyle = isImageUrl
+    ? {
+        backgroundImage: `url(${resolvedBackgroundSource || ''})`,
+        backgroundSize: activeBackgroundFit,
+        backgroundRepeat: 'no-repeat',
+        backgroundColor: '#000000',
+      }
+    : { background: resolvedBackgroundSource || '#000000' };
+
+  const syncBackgroundVideoElement = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) {
+      return;
+    }
+
+    if (!isBackgroundVideo || !activeBackgroundItem || !resolvedBackgroundSource) {
+      if (!video.paused) {
+        video.pause();
+      }
+      return;
+    }
+
+    const localTimelineMs = Math.max(0, timeMs - activeBackgroundItem.startMs);
+    const maxPlayableMs = activeBackgroundDurationMs > 0
+      ? Math.max(0, activeBackgroundDurationMs - 16)
+      : localTimelineMs;
+    const targetTimeSeconds = Math.max(0, Math.min(localTimelineMs, maxPlayableMs)) / 1000;
+    const shouldPlay = isPlaying && (activeBackgroundDurationMs <= 0 || localTimelineMs < activeBackgroundDurationMs - 16);
+    const syncThresholdSeconds = shouldPlay ? 0.15 : 0.05;
+
+    try {
+      if (Math.abs((video.currentTime || 0) - targetTimeSeconds) > syncThresholdSeconds) {
+        video.currentTime = targetTimeSeconds;
+      }
+    } catch {
+      // Ignore seek races while the source is still loading.
+    }
+
+    if (shouldPlay) {
+      void video.play().catch(() => {
+        // Ignore autoplay and decode failures in the editor preview.
+      });
+    } else if (!video.paused) {
+      video.pause();
+    }
+  }, [activeBackgroundDurationMs, activeBackgroundItem, isBackgroundVideo, isPlaying, resolvedBackgroundSource, timeMs]);
+
+  useEffect(() => {
+    const video = backgroundVideoRef.current;
+    syncBackgroundVideoElement(video);
+  }, [syncBackgroundVideoElement]);
   useEffect(() => {
     currentTimeRef.current = currentTime * 1000;
   }, [currentTime]);
@@ -2504,17 +3049,122 @@ function VideoPlayback(
   const shadowFilter = (showShadow && shadowIntensity > 0)
     ? `drop-shadow(0 ${shadowIntensity * 12}px ${shadowIntensity * 48}px rgba(0,0,0,${shadowIntensity * 0.7})) drop-shadow(0 ${shadowIntensity * 4}px ${shadowIntensity * 16}px rgba(0,0,0,${shadowIntensity * 0.5})) drop-shadow(0 ${shadowIntensity * 2}px ${shadowIntensity * 8}px rgba(0,0,0,${shadowIntensity * 0.3}))`
     : 'none';
+  const previewWorkspaceInsetPercent = ((1 - previewWorkspaceScale) / 2) * 100;
+  const stageTranslation = `translate(${previewStageRect.x}px, ${previewStageRect.y}px)`;
+  const workspaceViewStyle = {
+    transform: `translate(${workspaceView.panX}px, ${workspaceView.panY}px) scale(${workspaceView.zoom})`,
+    transformOrigin: 'center center',
+  } satisfies React.CSSProperties;
+  const stageWrapperStyle = {
+    transform: stageTranslation,
+    transformOrigin: 'top left',
+  } satisfies React.CSSProperties;
+  const safeFrameStyle: React.CSSProperties = previewStageRect.width > 0 && previewStageRect.height > 0
+    ? {
+        left: previewStageRect.x,
+        top: previewStageRect.y,
+        width: previewStageRect.width,
+        height: previewStageRect.height,
+      }
+    : {
+        left: `${previewWorkspaceInsetPercent}%`,
+        top: `${previewWorkspaceInsetPercent}%`,
+        width: `${previewWorkspaceScale * 100}%`,
+        height: `${previewWorkspaceScale * 100}%`,
+      };
 
   return (
-    <div className="relative rounded-sm overflow-hidden" style={{ width: '100%', aspectRatio: formatAspectRatioForCSS(aspectRatio) }}>
+    <div
+      ref={workspaceViewportRef}
+      className="relative rounded-sm overflow-hidden"
+      tabIndex={0}
+      style={{
+        width: '100%',
+        aspectRatio: formatAspectRatioForCSS(aspectRatio),
+        cursor: workspacePanEnabled ? (isWorkspacePanning ? 'grabbing' : 'grab') : 'default',
+        touchAction: 'none',
+      }}
+      onFocus={() => setWorkspaceFocused(true)}
+      onBlur={() => {
+        setWorkspaceFocused(false);
+        setSpacePanActive(false);
+        workspacePanSessionRef.current = null;
+        pinchSessionRef.current = null;
+        activePointerPositionsRef.current.clear();
+        setIsWorkspacePanning(false);
+      }}
+      onPointerEnter={() => setWorkspaceHovered(true)}
+      onPointerDown={handleWorkspacePointerDown}
+      onPointerMove={handleWorkspacePointerMove}
+      onPointerLeave={(event) => {
+        setWorkspaceHovered(false);
+        endWorkspacePan(event);
+      }}
+      onPointerUp={endWorkspacePan}
+      onPointerCancel={endWorkspacePan}
+      onWheel={handleWorkspaceWheel}
+    >
+      <div className="absolute inset-0 will-change-transform" style={workspaceViewStyle}>
       {/* Background layer - always render as DOM element with blur */}
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{
-          ...backgroundStyle,
-          filter: showBlur ? 'blur(2px)' : 'none',
-        }}
-      />
+      {isRetroGridBackground ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundColor: activeBackgroundBackdropColor,
+            filter: activeBackgroundBlurAmount > 0 ? `blur(${activeBackgroundBlurAmount}px)` : 'none',
+          }}
+        >
+          <RetroGrid
+            angle={activeRetroGridAngle}
+            cellSize={getRetroGridCellSize(activeRetroGridDensity)}
+            opacity={0.72}
+            lightLineColor={activeBackgroundAccentColor}
+            darkLineColor={activeBackgroundAccentColor}
+          />
+        </div>
+      ) : isRippleBackground ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundColor: activeBackgroundBackdropColor,
+            filter: activeBackgroundBlurAmount > 0 ? `blur(${activeBackgroundBlurAmount}px)` : 'none',
+          }}
+        >
+          <Ripple
+            className="[mask-image:none]"
+            mainCircleSize={210}
+            mainCircleOpacity={0.24}
+            numCircles={activeRippleCount}
+            animationDurationSeconds={getRippleAnimationDurationSeconds(activeRippleSpeed)}
+            style={{ color: activeBackgroundAccentColor }}
+          />
+        </div>
+      ) : isBackgroundVideo && resolvedBackgroundSource ? (
+        <video
+          key={`${activeBackgroundItem?.id ?? 'background'}:${resolvedBackgroundSource}`}
+          ref={backgroundVideoRef}
+          src={resolvedBackgroundSource}
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{
+            objectFit: activeBackgroundFit,
+            filter: activeBackgroundBlurAmount > 0 ? `blur(${activeBackgroundBlurAmount}px)` : 'none',
+            backgroundColor: '#000000',
+          }}
+          muted
+          playsInline
+          preload="auto"
+          onLoadedMetadata={() => syncBackgroundVideoElement(backgroundVideoRef.current)}
+          onCanPlay={() => syncBackgroundVideoElement(backgroundVideoRef.current)}
+        />
+      ) : (
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            ...backgroundStyle,
+            filter: activeBackgroundBlurAmount > 0 ? `blur(${activeBackgroundBlurAmount}px)` : 'none',
+          }}
+        />
+      )}
 
       <div className="absolute inset-0">
         <div
@@ -2528,52 +3178,54 @@ function VideoPlayback(
               className="absolute inset-0 pointer-events-none"
               style={{ zIndex: 1 }}
             >
-              {getActiveAnnotations('midground').map((annotation) => {
-                const containerWidth = midgroundRef.current?.clientWidth || overlayRef.current?.clientWidth || 800;
-                const containerHeight = midgroundRef.current?.clientHeight || overlayRef.current?.clientHeight || 600;
-                const x = (annotation.position.x / 100) * containerWidth;
-                const y = (annotation.position.y / 100) * containerHeight;
-                const width = (annotation.size.width / 100) * containerWidth;
-                const height = (annotation.size.height / 100) * containerHeight;
-                const fadeInMs = annotation.fadeInMs ?? 240;
-                const fadeOutMs = annotation.fadeOutMs ?? 240;
-                const start = annotation.startMs ?? 0;
-                const end = annotation.endMs ?? 0;
-                const progressIn = Math.max(0, Math.min(1, fadeInMs > 0 ? (timeMs - start) / fadeInMs : 1));
-                const progressOut = Math.max(0, Math.min(1, fadeOutMs > 0 ? (end - timeMs) / fadeOutMs : 1));
-                const enterEffect = annotation.enterEffect || 'none';
-                const exitEffect = annotation.exitEffect || 'none';
-                const enterAlpha = enterEffect === 'fade' || enterEffect === 'pop' ? progressIn : 1;
-                const exitAlpha = exitEffect === 'fade' || exitEffect === 'pop' ? progressOut : 1;
-                const opacity = Math.max(0, Math.min(1, enterAlpha * exitAlpha));
-                let scale = 1;
-                if (enterEffect === 'pop') {
-                  scale *= 0.82 + 0.18 * progressIn;
-                }
-                if (exitEffect === 'pop') {
-                  scale *= 0.9 + 0.1 * progressOut;
-                }
+              <div className="absolute inset-0 pointer-events-none" style={stageWrapperStyle}>
+                {getActiveAnnotations('midground').map((annotation) => {
+                  const containerWidth = stageSizeRef.current.width || midgroundRef.current?.clientWidth || 800;
+                  const containerHeight = stageSizeRef.current.height || midgroundRef.current?.clientHeight || 600;
+                  const x = (annotation.position.x / 100) * containerWidth;
+                  const y = (annotation.position.y / 100) * containerHeight;
+                  const width = (annotation.size.width / 100) * containerWidth;
+                  const height = (annotation.size.height / 100) * containerHeight;
+                  const fadeInMs = annotation.fadeInMs ?? 240;
+                  const fadeOutMs = annotation.fadeOutMs ?? 240;
+                  const start = annotation.startMs ?? 0;
+                  const end = annotation.endMs ?? 0;
+                  const progressIn = Math.max(0, Math.min(1, fadeInMs > 0 ? (timeMs - start) / fadeInMs : 1));
+                  const progressOut = Math.max(0, Math.min(1, fadeOutMs > 0 ? (end - timeMs) / fadeOutMs : 1));
+                  const enterEffect = annotation.enterEffect || 'none';
+                  const exitEffect = annotation.exitEffect || 'none';
+                  const enterAlpha = enterEffect === 'fade' || enterEffect === 'pop' ? progressIn : 1;
+                  const exitAlpha = exitEffect === 'fade' || exitEffect === 'pop' ? progressOut : 1;
+                  const opacity = Math.max(0, Math.min(1, enterAlpha * exitAlpha));
+                  let scale = 1;
+                  if (enterEffect === 'pop') {
+                    scale *= 0.82 + 0.18 * progressIn;
+                  }
+                  if (exitEffect === 'pop') {
+                    scale *= 0.9 + 0.1 * progressOut;
+                  }
 
-                return (
-                  <div
-                    key={annotation.id}
-                    className="absolute"
-                    style={{
-                      left: x,
-                      top: y,
-                      width,
-                      height,
-                      zIndex: annotation.zIndex,
-                      pointerEvents: 'none',
-                      opacity,
-                      transform: `scale(${scale})`,
-                      transformOrigin: 'center',
-                    }}
-                  >
-                    <AnnotationContentView annotation={annotation} />
-                  </div>
-                );
-              })}
+                  return (
+                    <div
+                      key={annotation.id}
+                      className="absolute"
+                      style={{
+                        left: x,
+                        top: y,
+                        width,
+                        height,
+                        zIndex: annotation.zIndex,
+                        pointerEvents: 'none',
+                        opacity,
+                        transform: `scale(${scale})`,
+                        transformOrigin: 'center',
+                      }}
+                    >
+                      <AnnotationContentView annotation={annotation} />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -2587,107 +3239,136 @@ function VideoPlayback(
             <div
               ref={clipVideoLayerRef}
               className="absolute inset-0 select-none"
-              style={{ zIndex: 8, pointerEvents: selectedClipId && !isPlaying ? 'auto' : 'none', transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
+              style={{
+                zIndex: 8,
+                pointerEvents: selectedClipId && !isPlaying && !workspaceInteractionLocked ? 'auto' : 'none',
+                transformStyle: 'preserve-3d',
+                backfaceVisibility: 'hidden',
+              }}
             >
-              {(() => {
-                if (!activeClipRegions.length) return null;
-                // Use stageSizeRef as the authoritative source for dimensions
-                // This avoids issues when DOM elements have transforms or are in transitional states
-                const stageSize = stageSizeRef.current;
-                const containerWidth = stageSize.width || clipVideoLayerRef.current?.clientWidth || 800;
-                const containerHeight = stageSize.height || clipVideoLayerRef.current?.clientHeight || 600;
-                
-                // Debug: Log containerWidth and parent transforms when rendering overlays
-                if (isOverlayDebugEnabled()) {
-                  const layerEl = clipVideoLayerRef.current;
-                  const screenGroup = screenGroupRef.current;
-                  logOverlayDebugExpanded('[Clip Debug][render]', {
-                    containerWidth,
-                    containerHeight,
-                    stageSizeWidth: stageSize.width,
-                    stageSizeHeight: stageSize.height,
-                    layerClientWidth: layerEl?.clientWidth,
-                    layerTransform: layerEl?.style.transform || 'none',
-                    screenGroupTransform: screenGroup?.style.transform || 'none',
-                    screenGroupRect: (() => {
-                      if (!screenGroup) return null;
-                      const rect = screenGroup.getBoundingClientRect();
-                      return {
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height,
-                        top: rect.top,
-                        right: rect.right,
-                        bottom: rect.bottom,
-                        left: rect.left,
-                      };
-                    })(),
-                  });
-                }
-                
-                // Get current overlay layer transform to pass to children
-                const parentTransform = clipVideoLayerRef.current?.style.transform || 'none';
-                
-                return activeClipRegions.map((region) => {
-                  if (!videoAssetMap.has(region.assetId)) return null;
-                  let interactionRect = clipRendererRef.current?.getClipInteractionRect(region.id) ?? null;
-                  if (!interactionRect) {
-                    if (isRecordingClip(region)) {
-                      const video = videoRef.current;
-                      if (video) {
-                        interactionRect = resolveRecordingVisibleRect({
-                          stageWidth: containerWidth,
-                          stageHeight: containerHeight,
-                          sourceWidth: video.videoWidth,
-                          sourceHeight: video.videoHeight,
-                          cropRegion: cropRegion ?? { x: 0, y: 0, width: 1, height: 1 },
-                          padding: padding ?? 0,
-                          screenOffset,
-                        });
-                      }
-                    } else {
-                      const asset = videoAssetMap.get(region.assetId);
-                      const videoWidth = asset?.width ?? 0;
-                      const videoHeight = asset?.height ?? 0;
-                      const layout = computeClipLayout({
-                        region,
-                        containerWidth,
-                        containerHeight,
-                        videoWidth,
-                        videoHeight,
-                      });
-                      if (layout) {
-                        const anchor = region.anchor ?? { x: 0, y: 0 };
-                        const scale = Math.max(0.01, region.scale ?? 1);
-                        interactionRect = {
-                          x: layout.dest.x + layout.dest.width * anchor.x * (1 - scale),
-                          y: layout.dest.y + layout.dest.height * anchor.y * (1 - scale),
-                          width: layout.dest.width * scale,
-                          height: layout.dest.height * scale,
+              <div className="absolute inset-0" style={stageWrapperStyle}>
+                {(() => {
+                  if (!activeClipRegions.length) return null;
+                  // Use stageSizeRef as the authoritative source for dimensions.
+                  const stageSize = stageSizeRef.current;
+                  const containerWidth = stageSize.width || clipVideoLayerRef.current?.clientWidth || 800;
+                  const containerHeight = stageSize.height || clipVideoLayerRef.current?.clientHeight || 600;
+
+                  if (isOverlayDebugEnabled()) {
+                    const layerEl = clipVideoLayerRef.current;
+                    const screenGroup = screenGroupRef.current;
+                    logOverlayDebugExpanded('[Clip Debug][render]', {
+                      containerWidth,
+                      containerHeight,
+                      stageSizeWidth: stageSize.width,
+                      stageSizeHeight: stageSize.height,
+                      layerClientWidth: layerEl?.clientWidth,
+                      layerTransform: layerEl?.style.transform || 'none',
+                      screenGroupTransform: screenGroup?.style.transform || 'none',
+                      screenGroupRect: (() => {
+                        if (!screenGroup) return null;
+                        const rect = screenGroup.getBoundingClientRect();
+                        return {
+                          x: rect.x,
+                          y: rect.y,
+                          width: rect.width,
+                          height: rect.height,
+                          top: rect.top,
+                          right: rect.right,
+                          bottom: rect.bottom,
+                          left: rect.left,
                         };
+                      })(),
+                    });
+                  }
+
+                  const parentTransform = `${clipVideoLayerRef.current?.style.transform || 'none'}|${stageTranslation}`;
+
+                  return activeClipRegions.map((region) => {
+                    if (!videoAssetMap.has(region.assetId)) return null;
+                    let interactionRect = clipRendererRef.current?.getClipInteractionRect(region.id) ?? null;
+                    if (!interactionRect) {
+                      if (isRecordingClip(region)) {
+                        const video = videoRef.current;
+                        if (video) {
+                          interactionRect = resolveRecordingVisibleRect({
+                            stageWidth: containerWidth,
+                            stageHeight: containerHeight,
+                            sourceWidth: video.videoWidth,
+                            sourceHeight: video.videoHeight,
+                            cropRegion: cropRegion ?? { x: 0, y: 0, width: 1, height: 1 },
+                            padding: padding ?? 0,
+                            screenOffset,
+                          });
+                        }
+                      } else {
+                        const asset = videoAssetMap.get(region.assetId);
+                        const videoWidth = asset?.width ?? 0;
+                        const videoHeight = asset?.height ?? 0;
+                        const resolvedTransformState = resolveClipTransformStateAtTime(
+                          region,
+                          Math.min(Math.max(timeMs, region.startMs), region.endMs),
+                        );
+                        const layout = computeClipLayout({
+                          region: {
+                            ...region,
+                            position: { x: resolvedTransformState.x, y: resolvedTransformState.y },
+                            size: { width: resolvedTransformState.width, height: resolvedTransformState.height },
+                          },
+                          containerWidth,
+                          containerHeight,
+                          videoWidth,
+                          videoHeight,
+                        });
+                        if (layout) {
+                          const anchor = region.anchor ?? { x: 0, y: 0 };
+                          const scale = Math.max(0.01, resolvedTransformState.scale);
+                          interactionRect = {
+                            x: layout.dest.x + layout.dest.width * anchor.x * (1 - scale),
+                            y: layout.dest.y + layout.dest.height * anchor.y * (1 - scale),
+                            width: layout.dest.width * scale,
+                            height: layout.dest.height * scale,
+                          };
+                        }
                       }
                     }
-                  }
-                  return (
-                    <ClipVideoItem
-                      key={region.id}
-                      region={region}
-                      containerWidth={containerWidth}
-                      containerHeight={containerHeight}
-                      interactionRect={interactionRect}
-                      currentTimeMs={timeMs}
-                      isPlaying={isPlaying}
-                      isSelected={region.id === selectedClipId}
-                      parentTransform={parentTransform}
-                      onSelect={(id) => onSelectClip?.(id)}
-                      onPositionChange={(id, position) => onClipPositionChange?.(id, position)}
-                      onSizeChange={(id, size) => onClipSizeChange?.(id, size)}
-                      onRectChange={(id, rect) => onClipRectChange?.(id, rect)}
-                    />
-                  );
-                });
-              })()}
+                    return (
+                      <ClipVideoItem
+                        key={region.id}
+                        region={region}
+                        containerWidth={containerWidth}
+                        containerHeight={containerHeight}
+                        interactionRect={interactionRect}
+                        currentTimeMs={timeMs}
+                        isPlaying={isPlaying}
+                        isSelected={region.id === selectedClipId}
+                        parentTransform={parentTransform}
+                        onSelect={(id) => onSelectClip?.(id)}
+                        onPositionChange={(id, position) => onClipPositionChange?.(id, position)}
+                        onSizeChange={(id, size) => onClipSizeChange?.(id, size)}
+                        onRectChange={(id, rect) => onClipRectChange?.(id, rect)}
+                      />
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          )}
+
+          <div ref={stageFrameRef} className="absolute pointer-events-none" style={{ ...safeFrameStyle, zIndex: 0, opacity: 0 }} />
+
+          {showSafeFrameOverlay && (
+            <div className="absolute pointer-events-none" style={{ ...safeFrameStyle, zIndex: 9 }}>
+              <div className="absolute inset-[1px] rounded-[2px] border border-white/30 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.24)]" />
+              <div className="absolute left-1/2 top-3 bottom-3 w-px -translate-x-1/2 bg-white/12" />
+              <div className="absolute top-1/2 left-3 right-3 h-px -translate-y-1/2 bg-white/12" />
+              <div className="absolute left-3 top-3 h-5 w-5 border-l border-t border-white/55" />
+              <div className="absolute right-3 top-3 h-5 w-5 border-r border-t border-white/55" />
+              <div className="absolute bottom-3 left-3 h-5 w-5 border-b border-l border-white/55" />
+              <div className="absolute bottom-3 right-3 h-5 w-5 border-b border-r border-white/55" />
+              <div className="absolute left-3 top-3 rounded bg-black/45 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-white/80">
+                Safe Frame
+              </div>
             </div>
           )}
 
@@ -2723,35 +3404,82 @@ function VideoPlayback(
                   }
                 };
                 
-                const overlayWidth = overlayRef.current?.clientWidth || 800;
-                const overlayHeight = overlayRef.current?.clientHeight || 600;
+                const overlayWidth = stageSizeRef.current.width || overlayRef.current?.clientWidth || 800;
+                const overlayHeight = stageSizeRef.current.height || overlayRef.current?.clientHeight || 600;
 
-                return sorted.map((annotation) => {
-                  const annLayer = annotation.layer || 'foreground';
-                  const isMidground = annLayer === 'midground';
-                  return (
-                    <AnnotationOverlay
-                      key={annotation.id}
-                      annotation={annotation}
-                      isSelected={annotation.id === selectedAnnotationId}
-                      containerWidth={overlayWidth}
-                      containerHeight={overlayHeight}
-                      onPositionChange={(id, position) => onAnnotationPositionChange?.(id, position)}
-                      onSizeChange={(id, size) => onAnnotationSizeChange?.(id, size)}
-                      onClick={handleAnnotationClick}
-                      zIndex={annotation.zIndex}
-                      isSelectedBoost={annotation.id === selectedAnnotationId}
-                      renderContent={!isMidground}
-                      ghostOpacity={isMidground ? 0.45 : 1}
-                      currentTimeMs={timeMs}
-                    />
-                  );
-                });
+                return (
+                  <div className="absolute inset-0" style={stageWrapperStyle}>
+                    {sorted.map((annotation) => {
+                      const annLayer = annotation.layer || 'foreground';
+                      const isMidground = annLayer === 'midground';
+                      return (
+                        <AnnotationOverlay
+                          key={annotation.id}
+                          annotation={annotation}
+                          isSelected={annotation.id === selectedAnnotationId}
+                          containerWidth={overlayWidth}
+                          containerHeight={overlayHeight}
+                          onPositionChange={(id, position) => onAnnotationPositionChange?.(id, position)}
+                          onSizeChange={(id, size) => onAnnotationSizeChange?.(id, size)}
+                          onClick={handleAnnotationClick}
+                          zIndex={annotation.zIndex}
+                          isSelectedBoost={annotation.id === selectedAnnotationId}
+                          renderContent={!isMidground}
+                          ghostOpacity={isMidground ? 0.45 : 1}
+                          currentTimeMs={timeMs}
+                        />
+                      );
+                    })}
+                  </div>
+                );
               })()}
               <canvas ref={cursorCanvasRef} className="absolute inset-0" style={{ pointerEvents: 'none' }} />
             </div>
           )}
         </div>
+      </div>
+      </div>
+
+      <div className="absolute right-3 top-3 z-[30] flex items-center gap-1.5 rounded-xl border border-white/10 bg-black/55 px-2 py-1.5 backdrop-blur-md" data-workspace-controls="true">
+        <button
+          type="button"
+          onClick={resetWorkspaceView}
+          className="rounded-md border border-white/10 px-2 py-1 text-[11px] font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+          title="Reset preview workspace to fit"
+        >
+          Fit
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomWorkspaceBy(-1)}
+          className="h-7 w-7 rounded-md border border-white/10 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+          title="Zoom out"
+        >
+          -
+        </button>
+        <div className="min-w-[3.5rem] text-center text-[11px] font-medium tabular-nums text-slate-200">
+          {Math.round(workspaceView.zoom * 100)}%
+        </div>
+        <button
+          type="button"
+          onClick={() => zoomWorkspaceBy(1)}
+          className="h-7 w-7 rounded-md border border-white/10 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={toggleWorkspacePanMode}
+          className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+            workspaceView.panMode
+              ? 'border-[#34B27B]/40 bg-[#34B27B]/18 text-[#7ee0b2]'
+              : 'border-white/10 text-slate-200 hover:border-white/20 hover:bg-white/10 hover:text-white'
+          }`}
+          title="Toggle preview pan mode"
+        >
+          Pan
+        </button>
       </div>
 
       <video

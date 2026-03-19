@@ -1,7 +1,7 @@
 import { useItem } from "dnd-timeline";
 import type { Span } from "dnd-timeline";
 import { cn } from "@/lib/utils";
-import { ZoomIn, Scissors, MessageSquare, MousePointer2, Sparkles, Clapperboard, AudioLines, Gauge } from "lucide-react";
+import { ZoomIn, Scissors, MessageSquare, MousePointer2, Sparkles, Clapperboard, AudioLines, Gauge, ImageIcon } from "lucide-react";
 import glassStyles from "./ItemGlass.module.css";
 import { clamp01 } from "../videoPlayback/mathUtils";
 
@@ -14,9 +14,16 @@ interface ItemProps {
   isSelected?: boolean;
   onSelect?: () => void;
   zoomDepth?: number;
-  variant?: 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'audio' | 'speed';
+  variant?: 'background' | 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'audio' | 'speed';
   annotationType?: 'text' | 'image' | 'figure' | 'emoji';
   speedValue?: number;
+  keyframes?: Array<{
+    id: string;
+    time: number;
+    isSelected?: boolean;
+    isCurrent?: boolean;
+  }>;
+  onKeyframeSelect?: (id: string, time: number, mode: "replace" | "toggle") => void;
 }
 
 const ZOOM_LABELS: Record<number, string> = {
@@ -53,6 +60,8 @@ export default function Item({
   children,
   annotationType,
   speedValue,
+  keyframes = [],
+  onKeyframeSelect,
 }: ItemProps) {
   const { setNodeRef, attributes, listeners, itemStyle, itemContentStyle } = useItem({
     id,
@@ -61,6 +70,7 @@ export default function Item({
   });
 
   const isZoom = variant === 'zoom';
+  const isBackground = variant === 'background';
   const isTrim = variant === 'trim';
   const isClip = variant === 'clip';
   const isCursor = variant === 'cursor';
@@ -68,8 +78,10 @@ export default function Item({
   const isAudio = variant === 'audio';
   const isSpeed = variant === 'speed';
   
-  const glassClass = isZoom 
-    ? glassStyles.glassGreen 
+  const glassClass = isBackground
+    ? glassStyles.glassGreen
+    : isZoom
+    ? glassStyles.glassGreen
     : isTrim 
     ? glassStyles.glassRed 
     : isClip
@@ -84,8 +96,10 @@ export default function Item({
     ? glassStyles.glassYellow
     : glassStyles.glassYellow;
     
-  const endCapColor = isZoom 
-    ? '#21916A' 
+  const endCapColor = isBackground
+    ? '#34B27B'
+    : isZoom
+    ? '#21916A'
     : isTrim 
     ? '#ef4444' 
     : isClip
@@ -101,6 +115,10 @@ export default function Item({
     : '#B4A046';
 
   const itemHeight = Math.max(32, trackHeight - 2);
+  const itemDuration = Math.max(1, span.end - span.start);
+  const visibleKeyframes = keyframes.filter((keyframe) => (
+    keyframe.time >= span.start && keyframe.time <= span.end
+  ));
 
   return (
     <div
@@ -108,6 +126,7 @@ export default function Item({
       style={{ ...itemStyle, height: itemHeight }}
       {...listeners}
       {...attributes}
+      data-timeline-item="true"
       onPointerDownCapture={() => onSelect?.()}
       onClick={(event) => event.stopPropagation()}
       onDragOver={(event) => {
@@ -157,12 +176,57 @@ export default function Item({
               </svg>
             </div>
           ) : null}
+          {isClip && visibleKeyframes.length > 0 ? (
+            <div className="absolute inset-x-2 top-1 h-3 z-30 pointer-events-none">
+              {visibleKeyframes.map((keyframe) => {
+                const leftPercent = ((keyframe.time - span.start) / itemDuration) * 100;
+                return (
+                  <button
+                    key={keyframe.id}
+                    type="button"
+                    className="absolute top-0 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] border border-white/25 bg-[#34B27B] pointer-events-auto transition-transform hover:scale-110"
+                    data-keyframe-marker="true"
+                    data-keyframe-id={keyframe.id}
+                    style={{
+                      left: `${leftPercent}%`,
+                      opacity: keyframe.isCurrent ? 1 : 0.78,
+                      boxShadow: keyframe.isSelected
+                        ? '0 0 0 2px rgba(52,178,123,0.4), 0 0 10px rgba(52,178,123,0.25)'
+                        : keyframe.isCurrent
+                          ? '0 0 10px rgba(52,178,123,0.3)'
+                          : 'none',
+                    }}
+                    title={`Transform keyframe @ ${(keyframe.time / 1000).toFixed(2)}s`}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelect?.();
+                      onKeyframeSelect?.(
+                        keyframe.id,
+                        keyframe.time,
+                        event.metaKey || event.ctrlKey || event.shiftKey ? "toggle" : "replace",
+                      );
+                    }}
+                  />
+                );
+              })}
+            </div>
+          ) : null}
           {/* Content */}
           <div className={cn(
             "relative z-20 flex items-center gap-1.5 text-white/90 opacity-80 group-hover:opacity-100 transition-opacity select-none",
             isSpeed ? "pb-7" : "",
           )}>
-            {isZoom ? (
+            {isBackground ? (
+              <>
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-semibold tracking-tight">
+                  {children}
+                </span>
+              </>
+            ) : isZoom ? (
               <>
                 <ZoomIn className="w-3.5 h-3.5" />
                 <span className="text-[11px] font-semibold tracking-tight">

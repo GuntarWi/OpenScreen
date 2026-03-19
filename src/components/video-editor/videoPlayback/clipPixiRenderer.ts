@@ -2,6 +2,7 @@ import { Container, Graphics, Sprite, Texture, VideoSource } from 'pixi.js';
 import type { VideoAsset, VideoClip } from '../types';
 import { applyChromaKeyToImageData, parseHexColor } from '@/utils/chromaKey';
 import { computeClipLayout } from '@/utils/clipLayout';
+import { resolveClipTransformStateAtTime, resolveClipTransformStateFromBase } from '@/utils/clipTransformKeyframes';
 import { getSourceOffsetForTimelineOffsetMs } from '../clipSpeedUtils';
 import { smoothStep } from './mathUtils';
 
@@ -72,6 +73,8 @@ type ClipItem = {
   recordingVideoSize?: { width: number; height: number };
   recordingSpriteOffset?: { x: number; y: number };
   recordingCropBounds?: { startX: number; endX: number; startY: number; endY: number };
+  recordingBaseRect?: ClipInteractionRect;
+  interactionRect?: ClipInteractionRect;
 };
 
 const PIXEL_GRID_ROWS = 4;
@@ -147,6 +150,7 @@ const isSlideEffect = (effect: string) =>
 
 const getClipLayoutKey = (region: VideoClip) => {
   const crop = region.crop;
+  const transformKeyframes = region.transformKeyframes ?? [];
   return [
     region.position.x,
     region.position.y,
@@ -158,11 +162,78 @@ const getClipLayoutKey = (region: VideoClip) => {
     crop?.y ?? 0,
     crop?.width ?? 100,
     crop?.height ?? 100,
+    ...transformKeyframes.flatMap((keyframe) => [
+      keyframe.timeMs,
+      keyframe.x,
+      keyframe.y,
+      keyframe.width,
+      keyframe.height,
+      keyframe.rotationDeg ?? 0,
+      keyframe.scale ?? 1,
+      keyframe.opacity ?? 1,
+      keyframe.easingToNext ?? 'linear',
+    ]),
   ].join('|');
 };
 
 const clampRadius = (radius: number, width: number, height: number) => {
   return Math.max(0, Math.min(radius, width / 2, height / 2));
+};
+
+const getTransformedBounds = ({
+  box,
+  anchor,
+  scaleX,
+  scaleY,
+  rotationDeg,
+  parentScale,
+  parentPosition,
+}: {
+  box: ClipInteractionRect;
+  anchor: { x: number; y: number };
+  scaleX: number;
+  scaleY: number;
+  rotationDeg: number;
+  parentScale: { x: number; y: number };
+  parentPosition: { x: number; y: number };
+}): ClipInteractionRect => {
+  const pivotX = box.width * anchor.x;
+  const pivotY = box.height * anchor.y;
+  const positionX = box.x + box.width * anchor.x;
+  const positionY = box.y + box.height * anchor.y;
+  const rotation = rotationDeg * DEG_TO_RAD;
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  const corners = [
+    { x: 0, y: 0 },
+    { x: box.width, y: 0 },
+    { x: box.width, y: box.height },
+    { x: 0, y: box.height },
+  ];
+
+  const worldPoints = corners.map((corner) => {
+    const localX = (corner.x - pivotX) * scaleX;
+    const localY = (corner.y - pivotY) * scaleY;
+    const rotatedX = localX * cos - localY * sin;
+    const rotatedY = localX * sin + localY * cos;
+    return {
+      x: parentPosition.x + (positionX + rotatedX) * parentScale.x,
+      y: parentPosition.y + (positionY + rotatedY) * parentScale.y,
+    };
+  });
+
+  const xs = worldPoints.map((point) => point.x);
+  const ys = worldPoints.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
 };
 
 const buildVideoElement = (src: string) => {
@@ -393,27 +464,14 @@ export class ClipPixiRenderer {
   getClipInteractionRect(id: string): ClipInteractionRect | null {
     const item = this.items.get(id);
     if (!item) return null;
-    if (item.clip.applyCamera) {
-      const width = item.boxRect?.width ?? item.visibleRect?.width ?? 0;
-      const height = item.boxRect?.height ?? item.visibleRect?.height ?? 0;
-      if (width > 0 && height > 0) {
-        const scaleX = item.container.scale.x || 1;
-        const scaleY = item.container.scale.y || 1;
-        const pivotX = item.container.pivot.x || 0;
-        const pivotY = item.container.pivot.y || 0;
-        return {
-          x: item.container.position.x + (item.content.position.x - pivotX) * scaleX,
-          y: item.container.position.y + (item.content.position.y - pivotY) * scaleY,
-          width: width * scaleX,
-          height: height * scaleY,
-        };
-      }
+    if (item.interactionRect) {
+      return { ...item.interactionRect };
     }
     const rect = item.visibleRect ?? item.boxRect ?? null;
     if (!rect) return null;
 
     const anchor = item.clip.anchor ?? { x: 0, y: 0 };
-    const scale = Math.max(0.01, item.clip.scale ?? 1);
+    const scale = Math.max(0.01, item.container.scale.x || 1);
     return {
       x: rect.x + rect.width * anchor.x * (1 - scale),
       y: rect.y + rect.height * anchor.y * (1 - scale),
@@ -423,17 +481,7 @@ export class ClipPixiRenderer {
   }
 
   applyScreenOffset(zoomScale: number) {
-    if (!this.recordingLayout) return;
-    const recordingItem = Array.from(this.items.values()).find((item) => item.clip.applyCamera);
-    if (!recordingItem || !recordingItem.baseOffset) return;
-
-    const invScale = zoomScale !== 0 ? 1 / zoomScale : 0;
-    const offsetX = this.recordingLayout.screenOffsetPx.x * invScale;
-    const offsetY = this.recordingLayout.screenOffsetPx.y * invScale;
-    recordingItem.content.position.set(
-      recordingItem.baseOffset.x + offsetX,
-      recordingItem.baseOffset.y + offsetY
-    );
+    void zoomScale;
   }
 
   setStageSize(size: StageSize) {
@@ -684,7 +732,7 @@ export class ClipPixiRenderer {
     return item;
   }
 
-  private updateLayoutForItem(item: ClipItem) {
+  private updateLayoutForItem(item: ClipItem, clip: VideoClip) {
     if (!this.stageSize.width || !this.stageSize.height) return;
 
     const sourceWidth = item.sprite.texture.source.width;
@@ -694,13 +742,13 @@ export class ClipPixiRenderer {
       return;
     }
 
-    if (item.clip.applyCamera && this.recordingLayout) {
+    if (clip.applyCamera && this.recordingLayout) {
       this.applyRecordingLayout(item, sourceWidth, sourceHeight);
       return;
     }
 
     const layout = computeClipLayout({
-      region: item.clip,
+      region: clip,
       containerWidth: this.stageSize.width,
       containerHeight: this.stageSize.height,
       videoWidth: sourceWidth,
@@ -742,7 +790,7 @@ export class ClipPixiRenderer {
     item.visibleRect = { ...dest };
     item.content.position.set(0, 0);
 
-    const radius = clampRadius(item.clip.borderRadius ?? 0, box.width, box.height);
+    const radius = clampRadius(clip.borderRadius ?? 0, box.width, box.height);
     item.mask.clear();
     item.mask.roundRect(0, 0, box.width, box.height, radius);
     item.mask.fill({ color: 0xffffff });
@@ -833,6 +881,8 @@ export class ClipPixiRenderer {
       cropEndY,
       layout.padding,
       layout.borderRadius,
+      layout.screenOffsetPx.x,
+      layout.screenOffsetPx.y,
     ].map((value) => value.toFixed(4)).join('|');
 
     const cropBounds = {
@@ -842,10 +892,18 @@ export class ClipPixiRenderer {
       endY: cropEndY * sourceHeight,
     };
 
+    const baseRect = {
+      x: centerOffsetX + layout.screenOffsetPx.x,
+      y: centerOffsetY + layout.screenOffsetPx.y,
+      width: croppedDisplayWidth,
+      height: croppedDisplayHeight,
+    };
+
     if (layoutKey === item.recordingLayoutKey) {
-      item.boxRect = { x: centerOffsetX, y: centerOffsetY, width: croppedDisplayWidth, height: croppedDisplayHeight };
-      item.visibleRect = { x: centerOffsetX, y: centerOffsetY, width: croppedDisplayWidth, height: croppedDisplayHeight };
-      item.baseOffset = { x: centerOffsetX, y: centerOffsetY };
+      item.boxRect = { ...baseRect };
+      item.visibleRect = { ...baseRect };
+      item.recordingBaseRect = { ...baseRect };
+      item.baseOffset = { x: baseRect.x, y: baseRect.y };
       item.recordingSpriteOffset = { x: spriteOffsetX, y: spriteOffsetY };
       item.recordingScale = scale;
       item.recordingVideoSize = { width: croppedVideoWidth, height: croppedVideoHeight };
@@ -855,15 +913,20 @@ export class ClipPixiRenderer {
 
     item.recordingLayoutKey = layoutKey;
     item.layoutKey = layoutKey;
-    item.boxRect = { x: centerOffsetX, y: centerOffsetY, width: croppedDisplayWidth, height: croppedDisplayHeight };
-    item.visibleRect = { x: centerOffsetX, y: centerOffsetY, width: croppedDisplayWidth, height: croppedDisplayHeight };
-    item.baseOffset = { x: centerOffsetX, y: centerOffsetY };
+    item.boxRect = { ...baseRect };
+    item.visibleRect = { ...baseRect };
+    item.recordingBaseRect = { ...baseRect };
+    item.baseOffset = { x: baseRect.x, y: baseRect.y };
     item.recordingSpriteOffset = { x: spriteOffsetX, y: spriteOffsetY };
     item.recordingScale = scale;
     item.recordingVideoSize = { width: croppedVideoWidth, height: croppedVideoHeight };
     item.recordingCropBounds = cropBounds;
 
-    item.content.position.set(centerOffsetX, centerOffsetY);
+    item.content.position.set(baseRect.x, baseRect.y);
+    item.content.pivot.set(0, 0);
+    item.content.scale.set(1, 1);
+    item.content.rotation = 0;
+    item.content.alpha = 1;
     item.sprite.position.set(-cropPixelX, -cropPixelY);
     item.sprite.width = spriteWidth;
     item.sprite.height = spriteHeight;
@@ -877,8 +940,7 @@ export class ClipPixiRenderer {
     updatePixelPiecesLayout(item.pixelPieces, croppedDisplayWidth, croppedDisplayHeight);
   }
 
-  private updateItemTransform(item: ClipItem, effectState: ClipEffectState) {
-    const clip = item.clip;
+  private updateItemTransform(item: ClipItem, clip: VideoClip, effectState: ClipEffectState, timeMs: number) {
     const box = item.boxRect;
     if (!box) return;
 
@@ -913,6 +975,30 @@ export class ClipPixiRenderer {
 
     if (clip.applyCamera) {
       if (!stageWidth || !stageHeight) return;
+      const baseRect = item.recordingBaseRect ?? item.boxRect;
+      if (!baseRect) return;
+      const baseState = {
+        x: (baseRect.x / stageWidth) * 100,
+        y: (baseRect.y / stageHeight) * 100,
+        width: (baseRect.width / stageWidth) * 100,
+        height: (baseRect.height / stageHeight) * 100,
+        rotationDeg: clip.rotationDeg ?? 0,
+        scale: clip.scale ?? 1,
+        opacity: clip.opacity ?? 1,
+      };
+      const resolvedState = resolveClipTransformStateFromBase(baseState, clip.transformKeyframes, timeMs);
+      const resolvedBox = {
+        x: (resolvedState.x / 100) * stageWidth,
+        y: (resolvedState.y / 100) * stageHeight,
+        width: (resolvedState.width / 100) * stageWidth,
+        height: (resolvedState.height / 100) * stageHeight,
+      };
+      const anchor = clip.anchor ?? { x: 0, y: 0 };
+      const sizeScaleX = baseRect.width > 0 ? resolvedBox.width / baseRect.width : 1;
+      const sizeScaleY = baseRect.height > 0 ? resolvedBox.height / baseRect.height : 1;
+      const uniformScale = Math.max(0.01, resolvedState.scale ?? 1);
+      const totalScaleX = sizeScaleX * uniformScale;
+      const totalScaleY = sizeScaleY * uniformScale;
       const focusStagePxX = this.cameraTransform.focusX * stageWidth;
       const focusStagePxY = this.cameraTransform.focusY * stageHeight;
       const stageCenterX = stageWidth / 2;
@@ -923,17 +1009,44 @@ export class ClipPixiRenderer {
       const transformKey = [
         'recording',
         scale.toFixed(4),
+        resolvedBox.x.toFixed(2),
+        resolvedBox.y.toFixed(2),
+        resolvedBox.width.toFixed(2),
+        resolvedBox.height.toFixed(2),
+        totalScaleX.toFixed(4),
+        totalScaleY.toFixed(4),
+        (resolvedState.rotationDeg ?? 0).toFixed(4),
         (cameraX + slideOffsetX).toFixed(2),
         (cameraY + slideOffsetY).toFixed(2),
-        opacity.toFixed(3),
+        effectOpacity.toFixed(3),
+        (resolvedState.opacity ?? 1).toFixed(3),
       ].join('|');
       if (transformKey !== item.transformKey) {
         item.transformKey = transformKey;
-        item.container.alpha = opacity;
+        item.container.alpha = effectOpacity;
         item.container.pivot.set(0, 0);
         item.container.rotation = 0;
         item.container.scale.set(scale, scale);
         item.container.position.set(cameraX + slideOffsetX, cameraY + slideOffsetY);
+        item.content.pivot.set(baseRect.width * anchor.x, baseRect.height * anchor.y);
+        item.content.position.set(
+          resolvedBox.x + resolvedBox.width * anchor.x,
+          resolvedBox.y + resolvedBox.height * anchor.y,
+        );
+        item.content.rotation = (resolvedState.rotationDeg ?? 0) * DEG_TO_RAD;
+        item.content.scale.set(totalScaleX, totalScaleY);
+        item.content.alpha = Math.max(0, Math.min(1, resolvedState.opacity ?? 1));
+        item.boxRect = { ...resolvedBox };
+        item.visibleRect = { ...resolvedBox };
+        item.interactionRect = getTransformedBounds({
+          box: baseRect,
+          anchor,
+          scaleX: totalScaleX,
+          scaleY: totalScaleY,
+          rotationDeg: resolvedState.rotationDeg ?? 0,
+          parentScale: { x: scale, y: scale },
+          parentPosition: { x: cameraX + slideOffsetX, y: cameraY + slideOffsetY },
+        });
       }
       return;
     }
@@ -968,6 +1081,8 @@ export class ClipPixiRenderer {
     item.container.rotation = rotation * DEG_TO_RAD;
     item.container.scale.set(scale, scale);
     item.container.alpha = opacity;
+    item.content.alpha = 1;
+    item.interactionRect = undefined;
   }
 
   private syncVideoTime(item: ClipItem, timeMs: number, isActive: boolean, shouldPlay: boolean) {
@@ -1056,6 +1171,30 @@ export class ClipPixiRenderer {
   private updateItemVisuals(item: ClipItem, timeMs: number) {
     if (this.destroyed || !this.items.has(item.clip.id)) return;
     const clip = item.clip;
+    const keyframeTimeMs = Math.min(Math.max(timeMs, clip.startMs), clip.endMs);
+    const resolvedClip = clip.applyCamera
+      ? clip
+      : (() => {
+          const resolvedState = resolveClipTransformStateAtTime(clip, keyframeTimeMs);
+          return (
+            resolvedState.x === clip.position.x &&
+            resolvedState.y === clip.position.y &&
+            resolvedState.width === clip.size.width &&
+            resolvedState.height === clip.size.height &&
+            resolvedState.rotationDeg === (clip.rotationDeg ?? 0) &&
+            resolvedState.scale === (clip.scale ?? 1) &&
+            resolvedState.opacity === (clip.opacity ?? 1)
+          )
+            ? clip
+            : {
+                ...clip,
+                position: { x: resolvedState.x, y: resolvedState.y },
+                size: { width: resolvedState.width, height: resolvedState.height },
+                rotationDeg: resolvedState.rotationDeg,
+                scale: resolvedState.scale,
+                opacity: resolvedState.opacity,
+              };
+        })();
 
     this.updateChromaFrame(item);
 
@@ -1074,10 +1213,10 @@ export class ClipPixiRenderer {
       item.layoutKey = '';
     }
 
-    this.updateLayoutForItem(item);
+    this.updateLayoutForItem(item, resolvedClip);
 
     const effectState = getClipEffectState(clip, timeMs);
-    this.updateItemTransform(item, effectState);
+    this.updateItemTransform(item, resolvedClip, effectState, keyframeTimeMs);
 
     const enterEffect = clip.enterEffect ?? 'none';
     const exitEffect = clip.exitEffect ?? 'none';

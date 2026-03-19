@@ -58,7 +58,6 @@
   }
 }
 
-
 @layer base {
   * {
     @apply border-border;
@@ -102,13 +101,13 @@
   .custom-scrollbar::-webkit-scrollbar-thumb:active {
     background: rgba(148, 163, 184, 0.28);
   }
-  
+
   /* Smooth playback scrubber */
   input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
   }
-  
+
   input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
@@ -153,5 +152,15 @@
 
   input[type="range"]::-moz-range-thumb:active {
     transform: scale(1.25);
+  }
+}
+
+@keyframes magicui-ripple {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(0.9);
   }
 }

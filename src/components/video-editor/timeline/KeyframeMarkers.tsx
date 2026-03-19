@@ -4,42 +4,61 @@ import { useTimelineContext } from "dnd-timeline";
 interface Keyframe {
   id: string;
   time: number;
+  color?: string;
+  title?: string;
+  clipId?: string;
+  kind?: 'clipTransform' | 'padding';
 }
 
 interface KeyframeMarkersProps {
   keyframes: Keyframe[];
-  selectedKeyframeId: string | null;
-  setSelectedKeyframeId: (id: string | null) => void;
+  selectedKeyframeIds: string[];
+  setSelectedKeyframeIds: React.Dispatch<React.SetStateAction<string[]>>;
+  onSelectKeyframe?: (keyframe: Keyframe) => void;
 }
 
-const KeyframeMarkers: React.FC<KeyframeMarkersProps> = ({ keyframes, selectedKeyframeId, setSelectedKeyframeId }) => {
+const KeyframeMarkers: React.FC<KeyframeMarkersProps> = ({
+  keyframes,
+  selectedKeyframeIds,
+  setSelectedKeyframeIds,
+  onSelectKeyframe,
+}) => {
   const { sidebarWidth, range, valueToPixels } = useTimelineContext();
   return (
     <>
-      {keyframes.map(kf => {
+      {keyframes.map((kf) => {
         const offset = valueToPixels(kf.time - range.start);
-        const isSelected = kf.id === selectedKeyframeId;
+        const isSelected = selectedKeyframeIds.includes(kf.id);
         return (
           <div
             key={kf.id}
-            className={`absolute top-8 cursor-pointer ${isSelected ? 'ring-2 ring-[#34B27B]' : ''}`}
-            style={{ left: `${sidebarWidth + offset - 8}px`, zIndex: 40 }}
-            onClick={e => {
+            className={`absolute cursor-pointer ${isSelected ? 'ring-2 ring-[#34B27B]' : ''}`}
+            style={{ left: `${sidebarWidth + offset - 8}px`, top: '11px', zIndex: 40 }}
+            onClick={(e) => {
               e.stopPropagation();
-              setSelectedKeyframeId(kf.id);
+              const shouldToggle = e.metaKey || e.ctrlKey || e.shiftKey;
+              setSelectedKeyframeIds((prev) => (
+                shouldToggle
+                  ? (prev.includes(kf.id) ? prev.filter((id) => id !== kf.id) : [...prev, kf.id])
+                  : [kf.id]
+              ));
+              onSelectKeyframe?.(kf);
             }}
-            title={`Keyframe @ ${kf.time}ms`}
+            title={kf.title ?? `Keyframe @ ${kf.time}ms`}
+            data-keyframe-marker="true"
+            data-keyframe-id={kf.id}
           >
-            <div style={{
-              width: '10px',
-              height: '10px',
-              background: '#ffe100ff',
-              transform: 'rotate(45deg)',
-              border: 'none',
-             
-              opacity: isSelected ? 1 : 0.6,
-              transition: 'opacity 0.15s',
-            }} />
+            <div
+              style={{
+                width: '10px',
+                height: '10px',
+                background: kf.color ?? '#ffe100',
+                transform: 'rotate(45deg)',
+                border: 'none',
+                opacity: isSelected ? 1 : 0.72,
+                transition: 'opacity 0.15s',
+              }}
+            />
           </div>
         );
       })}

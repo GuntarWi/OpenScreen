@@ -2,11 +2,12 @@ import type { ExportConfig, ExportProgress, ExportResult } from './types';
 import { VideoFileDecoder } from './videoDecoder';
 import { FrameRenderer } from './frameRenderer';
 import { VideoMuxer } from './muxer';
-import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe } from '@/components/video-editor/types';
+import type { ZoomRegion, CropRegion, TrimRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe, BackgroundItem } from '@/components/video-editor/types';
 
 interface VideoExporterConfig extends ExportConfig {
   videoUrl: string;
   wallpaper: string;
+  backgroundItems?: BackgroundItem[];
   zoomRegions: ZoomRegion[];
   trimRegions?: TrimRegion[];
   showShadow: boolean;
@@ -112,6 +113,7 @@ export class VideoExporter {
         width: this.config.width,
         height: this.config.height,
         wallpaper: this.config.wallpaper,
+        backgroundItems: this.config.backgroundItems,
         zoomRegions: this.config.zoomRegions,
         showShadow: this.config.showShadow,
         shadowIntensity: this.config.shadowIntensity,

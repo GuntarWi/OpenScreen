@@ -1,5 +1,22 @@
 import { Application, BlurFilter } from 'pixi.js';
-import { RECORDING_ASSET_ID, type ZoomRegion, CropRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe } from '@/components/video-editor/types';
+import { getAssetPath } from '@/lib/assetPath';
+import { RECORDING_ASSET_ID, type ZoomRegion, CropRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe, BackgroundItem } from '@/components/video-editor/types';
+import {
+  DEFAULT_BACKGROUND_ACCENT_COLOR,
+  DEFAULT_BACKGROUND_BACKDROP_COLOR,
+  DEFAULT_BACKGROUND_VALUE,
+  DEFAULT_RETRO_GRID_ANGLE,
+  DEFAULT_RETRO_GRID_DENSITY,
+  DEFAULT_RIPPLE_COUNT,
+  DEFAULT_RIPPLE_SPEED,
+  getBackgroundItemSource,
+  getRetroGridCellSize,
+  getRippleAnimationDurationSeconds,
+  inferBackgroundKindFromValue,
+  MAGICUI_RETRO_GRID_VALUE,
+  MAGICUI_RIPPLE_VALUE,
+  resolveActiveBackgroundItem,
+} from '@/components/video-editor/backgroundUtils';
 import { interpolatePadding } from '@/utils/paddingKeyframes';
 import { ZOOM_DEPTH_SCALES } from '@/components/video-editor/types';
 import { findDominantRegion } from '@/components/video-editor/videoPlayback/zoomRegionUtils';
@@ -18,6 +35,7 @@ interface FrameRenderConfig {
   width: number;
   height: number;
   wallpaper: string;
+  backgroundItems?: BackgroundItem[];
   zoomRegions: ZoomRegion[];
   showShadow: boolean;
   shadowIntensity: number;
@@ -66,6 +84,8 @@ export class FrameRenderer {
   private screenOffsetPx = { x: 0, y: 0 };
   private recordingClipIds: string[] = [];
   private recordingVideo: HTMLVideoElement | null = null;
+  private backgroundImageCache = new Map<string, HTMLImageElement>();
+  private backgroundVideoCache = new Map<string, HTMLVideoElement>();
 
   constructor(config: FrameRenderConfig) {
     this.config = config;
@@ -180,120 +200,394 @@ export class FrameRenderer {
   }
 
   private async setupBackground(): Promise<void> {
-    const wallpaper = this.config.wallpaper;
-
-    // Create background canvas for separate rendering (not affected by zoom)
     const bgCanvas = document.createElement('canvas');
     bgCanvas.width = this.config.width;
     bgCanvas.height = this.config.height;
-    const bgCtx = bgCanvas.getContext('2d')!;
+    this.backgroundSprite = bgCanvas;
+    await this.renderBackgroundFrame(0);
+  }
+
+  private async resolveBackgroundSourceUrl(source: string): Promise<string> {
+    if (
+      source === MAGICUI_RETRO_GRID_VALUE ||
+      source === MAGICUI_RIPPLE_VALUE ||
+      source.startsWith('#') ||
+      source.startsWith('linear-gradient') ||
+      source.startsWith('radial-gradient') ||
+      source.startsWith('data:') ||
+      source.startsWith('http') ||
+      source.startsWith('file://')
+    ) {
+      return source;
+    }
+
+    return getAssetPath(source.replace(/^\//, ''));
+  }
+
+  private drawRetroGridBackground(
+    ctx: CanvasRenderingContext2D,
+    timeMs: number,
+    blurAmount = 0,
+    backdropColor = DEFAULT_BACKGROUND_BACKDROP_COLOR,
+    accentColor = DEFAULT_BACKGROUND_ACCENT_COLOR,
+    angleDeg = DEFAULT_RETRO_GRID_ANGLE,
+    density = DEFAULT_RETRO_GRID_DENSITY,
+  ): void {
+    const width = this.config.width;
+    const height = this.config.height;
+    const cellSize = getRetroGridCellSize(density);
+    const angleFactor = Math.min(1, Math.max(0, (angleDeg - 25) / 60));
+    const horizonY = height * (0.48 - angleFactor * 0.18);
+    const centerX = width / 2;
+    const travel = ((timeMs / 1000) / 15) % 1;
+
+    ctx.save();
+    if (blurAmount > 0) {
+      ctx.filter = `blur(${blurAmount}px)`;
+    }
+
+    ctx.fillStyle = backdropColor;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.55;
+    ctx.shadowColor = accentColor;
+    ctx.shadowBlur = 10;
+
+    const verticalLineCount = Math.max(10, Math.round((width / cellSize) * 0.9));
+    const bottomSpread = width * 2.8;
+    const horizonSpread = width * (0.12 + angleFactor * 0.14);
+
+    for (let i = -verticalLineCount; i <= verticalLineCount; i += 1) {
+      const t = i / verticalLineCount;
+      ctx.beginPath();
+      ctx.moveTo(centerX + t * horizonSpread, horizonY);
+      ctx.lineTo(centerX + t * bottomSpread, height);
+      ctx.stroke();
+    }
+
+    const horizontalLineCount = Math.max(12, Math.round(((height - horizonY) / cellSize) * 3.4));
+    for (let i = 0; i < horizontalLineCount; i += 1) {
+      const depth = ((i + travel) % horizontalLineCount) / horizontalLineCount;
+      const eased = depth * depth;
+      const y = horizonY + eased * (height - horizonY);
+      const halfWidth = eased * width * 2.9;
+      ctx.beginPath();
+      ctx.moveTo(centerX - halfWidth, y);
+      ctx.lineTo(centerX + halfWidth, y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  private drawRippleBackground(
+    ctx: CanvasRenderingContext2D,
+    timeMs: number,
+    blurAmount = 0,
+    backdropColor = DEFAULT_BACKGROUND_BACKDROP_COLOR,
+    accentColor = DEFAULT_BACKGROUND_ACCENT_COLOR,
+    rippleSpeed = DEFAULT_RIPPLE_SPEED,
+    rippleCount = DEFAULT_RIPPLE_COUNT,
+  ): void {
+    const width = this.config.width;
+    const height = this.config.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const baseSize = Math.min(width, height) * 0.2;
+    const circleGap = Math.min(width, height) * 0.065;
+    const numCircles = rippleCount;
+    const animationSeconds = getRippleAnimationDurationSeconds(rippleSpeed);
+    const phase = (timeMs / 1000) / animationSeconds;
+
+    ctx.save();
+    if (blurAmount > 0) {
+      ctx.filter = `blur(${blurAmount}px)`;
+    }
+
+    ctx.fillStyle = backdropColor;
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = accentColor;
+    ctx.shadowColor = accentColor;
+    ctx.shadowBlur = 14;
+
+    for (let i = 0; i < numCircles; i += 1) {
+      const pulse = 0.94 + 0.06 * Math.sin((phase - i * 0.12) * Math.PI * 2);
+      const radius = ((baseSize + i * circleGap) * pulse) / 2;
+      const opacityStep = numCircles > 1 ? 0.18 / (numCircles - 1) : 0;
+      const opacity = Math.max(0.03, 0.24 - i * opacityStep);
+      ctx.beginPath();
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = opacity;
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  private drawBackgroundFill(ctx: CanvasRenderingContext2D, value: string): void {
+    if (value.startsWith('#')) {
+      ctx.fillStyle = value;
+      ctx.fillRect(0, 0, this.config.width, this.config.height);
+      return;
+    }
+
+    if (value.startsWith('linear-gradient') || value.startsWith('radial-gradient')) {
+      const gradientMatch = value.match(/(linear|radial)-gradient\((.+)\)/);
+      if (gradientMatch) {
+        const [, type, params] = gradientMatch;
+        const parts = params.split(',').map((part) => part.trim());
+        let gradient: CanvasGradient;
+
+        if (type === 'linear') {
+          gradient = ctx.createLinearGradient(0, 0, 0, this.config.height);
+          parts.forEach((part, index) => {
+            if (part.startsWith('to ') || part.includes('deg')) {
+              return;
+            }
+            const colorMatch = part.match(/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|[a-z]+)/);
+            if (colorMatch) {
+              gradient.addColorStop(index / Math.max(1, parts.length - 1), colorMatch[1]);
+            }
+          });
+        } else {
+          const cx = this.config.width / 2;
+          const cy = this.config.height / 2;
+          const radius = Math.max(this.config.width, this.config.height) / 2;
+          gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+          parts.forEach((part, index) => {
+            const colorMatch = part.match(/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|[a-z]+)/);
+            if (colorMatch) {
+              gradient.addColorStop(index / Math.max(1, parts.length - 1), colorMatch[1]);
+            }
+          });
+        }
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, this.config.width, this.config.height);
+        return;
+      }
+    }
+
+    ctx.fillStyle = value || '#000000';
+    ctx.fillRect(0, 0, this.config.width, this.config.height);
+  }
+
+  private drawBackgroundMedia(
+    ctx: CanvasRenderingContext2D,
+    source: CanvasImageSource,
+    sourceWidth: number,
+    sourceHeight: number,
+    fit: 'cover' | 'contain',
+    blurAmount = 0,
+  ): void {
+    if (sourceWidth <= 0 || sourceHeight <= 0) {
+      return;
+    }
+
+    const sourceAspect = sourceWidth / sourceHeight;
+    const canvasAspect = this.config.width / this.config.height;
+    let drawWidth: number;
+    let drawHeight: number;
+    let drawX: number;
+    let drawY: number;
+
+    if (fit === 'contain') {
+      if (sourceAspect > canvasAspect) {
+        drawWidth = this.config.width;
+        drawHeight = drawWidth / sourceAspect;
+        drawX = 0;
+        drawY = (this.config.height - drawHeight) / 2;
+      } else {
+        drawHeight = this.config.height;
+        drawWidth = drawHeight * sourceAspect;
+        drawX = (this.config.width - drawWidth) / 2;
+        drawY = 0;
+      }
+    } else {
+      if (sourceAspect > canvasAspect) {
+        drawHeight = this.config.height;
+        drawWidth = drawHeight * sourceAspect;
+        drawX = (this.config.width - drawWidth) / 2;
+        drawY = 0;
+      } else {
+        drawWidth = this.config.width;
+        drawHeight = drawWidth / sourceAspect;
+        drawX = 0;
+        drawY = (this.config.height - drawHeight) / 2;
+      }
+    }
+
+    ctx.save();
+    if (blurAmount > 0) {
+      ctx.filter = `blur(${blurAmount}px)`;
+    }
+    ctx.drawImage(source, drawX, drawY, drawWidth, drawHeight);
+    ctx.restore();
+  }
+
+  private async getCachedBackgroundImage(source: string): Promise<HTMLImageElement> {
+    const resolved = await this.resolveBackgroundSourceUrl(source);
+    const cached = this.backgroundImageCache.get(resolved);
+    if (cached) {
+      return cached;
+    }
+
+    const image = new Image();
+    if (
+      typeof window !== 'undefined' &&
+      resolved.startsWith('http') &&
+      !resolved.startsWith(window.location.origin)
+    ) {
+      image.crossOrigin = 'anonymous';
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`Failed to load background image: ${resolved}`));
+      image.src = resolved;
+    });
+
+    this.backgroundImageCache.set(resolved, image);
+    return image;
+  }
+
+  private async getCachedBackgroundVideo(cacheKey: string, source: string): Promise<HTMLVideoElement> {
+    const resolved = await this.resolveBackgroundSourceUrl(source);
+    const key = `${cacheKey}:${resolved}`;
+    const cached = this.backgroundVideoCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.src = resolved;
+
+    await new Promise<void>((resolve, reject) => {
+      const handleReady = () => {
+        cleanup();
+        resolve();
+      };
+      const handleError = () => {
+        cleanup();
+        reject(new Error(`Failed to load background video: ${resolved}`));
+      };
+      const cleanup = () => {
+        video.removeEventListener('loadeddata', handleReady);
+        video.removeEventListener('error', handleError);
+      };
+      video.addEventListener('loadeddata', handleReady);
+      video.addEventListener('error', handleError);
+      video.load();
+    });
+
+    this.backgroundVideoCache.set(key, video);
+    return video;
+  }
+
+  private async seekBackgroundVideo(video: HTMLVideoElement, targetTimeSeconds: number): Promise<void> {
+    if (!Number.isFinite(targetTimeSeconds)) {
+      return;
+    }
+
+    if (Math.abs((video.currentTime || 0) - targetTimeSeconds) <= 0.033) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const handleSeeked = () => {
+        video.removeEventListener('seeked', handleSeeked);
+        resolve();
+      };
+      video.addEventListener('seeked', handleSeeked);
+      try {
+        video.currentTime = targetTimeSeconds;
+      } catch {
+        video.removeEventListener('seeked', handleSeeked);
+        resolve();
+      }
+    });
+  }
+
+  private async renderBackgroundFrame(timeMs: number): Promise<void> {
+    if (!this.backgroundSprite) {
+      return;
+    }
+
+    const bgCanvas = this.backgroundSprite;
+    const bgCtx = bgCanvas.getContext('2d');
+    if (!bgCtx) {
+      return;
+    }
+
+    bgCtx.clearRect(0, 0, this.config.width, this.config.height);
+    bgCtx.fillStyle = '#000000';
+    bgCtx.fillRect(0, 0, this.config.width, this.config.height);
+
+    const activeItem = resolveActiveBackgroundItem(this.config.backgroundItems || [], Math.round(timeMs));
+    const rawSource = getBackgroundItemSource(activeItem, this.config.videoAssets || []);
+    const hasTimelineBackgrounds = (this.config.backgroundItems?.length ?? 0) > 0;
+    const source = rawSource || (!hasTimelineBackgrounds ? this.config.wallpaper || DEFAULT_BACKGROUND_VALUE : null);
+    const kind = activeItem?.kind === 'video' && rawSource
+      ? 'video'
+      : activeItem?.kind ?? inferBackgroundKindFromValue(source || DEFAULT_BACKGROUND_VALUE);
+    const fit = activeItem?.fit ?? 'cover';
+    const blurAmount = activeItem?.blurAmount ?? (!hasTimelineBackgrounds && this.config.showBlur ? 2 : 0);
+    const backdropColor = activeItem?.backdropColor ?? DEFAULT_BACKGROUND_BACKDROP_COLOR;
+    const accentColor = activeItem?.accentColor ?? DEFAULT_BACKGROUND_ACCENT_COLOR;
+    const retroGridAngle = activeItem?.retroGridAngle ?? DEFAULT_RETRO_GRID_ANGLE;
+    const retroGridDensity = activeItem?.retroGridDensity ?? DEFAULT_RETRO_GRID_DENSITY;
+    const rippleSpeed = activeItem?.rippleSpeed ?? DEFAULT_RIPPLE_SPEED;
+    const rippleCount = activeItem?.rippleCount ?? DEFAULT_RIPPLE_COUNT;
+
+    if (!source) {
+      return;
+    }
 
     try {
-      // Render background based on type
-      if (wallpaper.startsWith('file://') || wallpaper.startsWith('data:') || wallpaper.startsWith('/') || wallpaper.startsWith('http')) {
-        // Image background
-        const img = new Image();
-        // Don't set crossOrigin for same-origin images to avoid CORS taint
-        // Only set it for cross-origin URLs
-        let imageUrl: string;
-        if (wallpaper.startsWith('http')) {
-          imageUrl = wallpaper;
-          if (!imageUrl.startsWith(window.location.origin)) {
-            img.crossOrigin = 'anonymous';
-          }
-        } else if (wallpaper.startsWith('file://') || wallpaper.startsWith('data:')) {
-          imageUrl = wallpaper;
-        } else {
-          imageUrl = window.location.origin + wallpaper;
-        }
-        
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = (err) => {
-            console.error('[FrameRenderer] Failed to load background image:', imageUrl, err);
-            reject(new Error(`Failed to load background image: ${imageUrl}`));
-          };
-          img.src = imageUrl;
-        });
-        
-        // Draw the image using cover and center positioning
-        const imgAspect = img.width / img.height;
-        const canvasAspect = this.config.width / this.config.height;
-        
-        let drawWidth, drawHeight, drawX, drawY;
-        
-        if (imgAspect > canvasAspect) {
-          drawHeight = this.config.height;
-          drawWidth = drawHeight * imgAspect;
-          drawX = (this.config.width - drawWidth) / 2;
-          drawY = 0;
-        } else {
-          drawWidth = this.config.width;
-          drawHeight = drawWidth / imgAspect;
-          drawX = 0;
-          drawY = (this.config.height - drawHeight) / 2;
-        }
-        
-        bgCtx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
-      } else if (wallpaper.startsWith('#')) {
-        bgCtx.fillStyle = wallpaper;
-        bgCtx.fillRect(0, 0, this.config.width, this.config.height);
-      } else if (wallpaper.startsWith('linear-gradient') || wallpaper.startsWith('radial-gradient')) {
-        
-        const gradientMatch = wallpaper.match(/(linear|radial)-gradient\((.+)\)/);
-        if (gradientMatch) {
-          const [, type, params] = gradientMatch;
-          const parts = params.split(',').map(s => s.trim());
-          
-          let gradient: CanvasGradient;
-          
-          if (type === 'linear') {
-            gradient = bgCtx.createLinearGradient(0, 0, 0, this.config.height);
-            parts.forEach((part, index) => {
-              if (part.startsWith('to ') || part.includes('deg')) return;
-              
-              const colorMatch = part.match(/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|[a-z]+)/);
-              if (colorMatch) {
-                const color = colorMatch[1];
-                const position = index / (parts.length - 1);
-                gradient.addColorStop(position, color);
-              }
-            });
-          } else {
-            const cx = this.config.width / 2;
-            const cy = this.config.height / 2;
-            const radius = Math.max(this.config.width, this.config.height) / 2;
-            gradient = bgCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-            
-            parts.forEach((part, index) => {
-              const colorMatch = part.match(/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|[a-z]+)/);
-              if (colorMatch) {
-                const color = colorMatch[1];
-                const position = index / (parts.length - 1);
-                gradient.addColorStop(position, color);
-              }
-            });
-          }
-          
-          bgCtx.fillStyle = gradient;
-          bgCtx.fillRect(0, 0, this.config.width, this.config.height);
-        } else {
-          console.warn('[FrameRenderer] Could not parse gradient, using black fallback');
-          bgCtx.fillStyle = '#000000';
-          bgCtx.fillRect(0, 0, this.config.width, this.config.height);
-        }
-      } else {
-        bgCtx.fillStyle = wallpaper;
-        bgCtx.fillRect(0, 0, this.config.width, this.config.height);
+      if (kind === 'video' && activeItem) {
+        const video = await this.getCachedBackgroundVideo(activeItem.assetId || source, source);
+        const assetDurationMs = activeItem.assetId
+          ? this.config.videoAssets?.find((asset) => asset.id === activeItem.assetId)?.durationMs ?? 0
+          : 0;
+        const localTimelineMs = Math.max(0, timeMs - activeItem.startMs);
+        const maxPlayableMs = assetDurationMs > 0
+          ? Math.max(0, assetDurationMs - 16)
+          : localTimelineMs;
+        const targetTimeSeconds = Math.max(0, Math.min(localTimelineMs, maxPlayableMs)) / 1000;
+        await this.seekBackgroundVideo(video, targetTimeSeconds);
+        this.drawBackgroundMedia(bgCtx, video, video.videoWidth || this.config.width, video.videoHeight || this.config.height, fit, blurAmount);
+        return;
       }
+
+      if (kind === 'preset' && source === MAGICUI_RETRO_GRID_VALUE) {
+        this.drawRetroGridBackground(bgCtx, timeMs, blurAmount, backdropColor, accentColor, retroGridAngle, retroGridDensity);
+        return;
+      }
+
+      if (kind === 'preset' && source === MAGICUI_RIPPLE_VALUE) {
+        this.drawRippleBackground(bgCtx, timeMs, blurAmount, backdropColor, accentColor, rippleSpeed, rippleCount);
+        return;
+      }
+
+      if (kind === 'color' || kind === 'gradient' || source.startsWith('#') || source.startsWith('linear-gradient') || source.startsWith('radial-gradient')) {
+        this.drawBackgroundFill(bgCtx, source);
+        return;
+      }
+
+      const image = await this.getCachedBackgroundImage(source);
+      this.drawBackgroundMedia(bgCtx, image, image.naturalWidth || image.width, image.naturalHeight || image.height, fit, blurAmount);
     } catch (error) {
-      console.error('[FrameRenderer] Error setting up background, using fallback:', error);
+      console.error('[FrameRenderer] Error rendering background frame, using fallback:', error);
       bgCtx.fillStyle = '#000000';
       bgCtx.fillRect(0, 0, this.config.width, this.config.height);
     }
-
-    // Store the background canvas for compositing
-    this.backgroundSprite = bgCanvas;
   }
 
   async renderFrame(timestamp: number): Promise<void> {
@@ -307,6 +601,7 @@ export class FrameRenderer {
 
     // Apply layout with current time for keyframe interpolation
     this.updateLayout(timeMs);
+    await this.renderBackgroundFrame(timeMs);
     const effectState = computeEffectState(this.config.effectRegions || [], timeMs);
     const TICKS_PER_FRAME = 1;
     
@@ -953,6 +1248,13 @@ export class FrameRenderer {
       this.app = null;
     }
     this.blurFilter = null;
+    this.backgroundImageCache.clear();
+    this.backgroundVideoCache.forEach((video) => {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    });
+    this.backgroundVideoCache.clear();
     this.shadowCanvas = null;
     this.shadowCtx = null;
     this.compositeCanvas = null;

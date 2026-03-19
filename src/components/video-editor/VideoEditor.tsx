@@ -17,6 +17,7 @@ import { ProjectToolbar } from "./ProjectToolbar";
 import type { Span } from "dnd-timeline";
 import {
   DEFAULT_ZOOM_DEPTH,
+  type BackgroundItem,
   clampFocusToDepth,
   DEFAULT_CROP_REGION,
   DEFAULT_SCREEN_OFFSET,
@@ -54,6 +55,16 @@ import {
   type End2EndParams,
   type PaddingKeyframe,
 } from "./types";
+import {
+  DEFAULT_BACKGROUND_ACCENT_COLOR,
+  BACKGROUND_TRACK_ID,
+  DEFAULT_BACKGROUND_BACKDROP_COLOR,
+  DEFAULT_BACKGROUND_VALUE,
+  getBackgroundItemSource,
+  inferBackgroundKindFromValue,
+  normalizeBackgroundItem,
+  resolveActiveBackgroundItem,
+} from "./backgroundUtils";
 import { interpolatePadding } from "@/utils/paddingKeyframes";
 import { normalizeClipCrop } from "@/utils/clipLayout";
 import {
@@ -69,6 +80,13 @@ import {
   getSourceOffsetForTimelineOffsetMs,
   withUpdatedClipDuration,
 } from "./clipSpeedUtils";
+import {
+  getBaseClipTransformState,
+  normalizeClipTransformKeyframes,
+  resolveClipTransformStateAtTime,
+  resolveClipTransformStateFromBase,
+  upsertClipTransformKeyframe,
+} from "@/utils/clipTransformKeyframes";
 
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_PATHS = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `/wallpapers/wallpaper${i + 1}.jpg`);
@@ -100,9 +118,11 @@ function buildBaseTrack(
 }
 
 function withNormalizedClipDuration(clip: VideoClip): VideoClip {
+  const baseState = getBaseClipTransformState(clip);
   return withUpdatedClipDuration({
     ...clip,
     crop: normalizeClipCrop(clip.crop),
+    transformKeyframes: normalizeClipTransformKeyframes(clip.transformKeyframes, baseState),
   });
 }
 
@@ -120,6 +140,9 @@ function isUniversalTrack(track: TimelineTrack): boolean {
 }
 
 function canTrackAcceptItemType(track: TimelineTrack, itemType: TimelineTrackItemType): boolean {
+  if (track.type === 'background') {
+    return itemType === 'background';
+  }
   if (track.type === 'recording') {
     return itemType === 'videoClip';
   }
@@ -169,8 +192,11 @@ export default function VideoEditor() {
   const [duration, setDuration] = useState(0);
   const [defaultImageClipDurationMs, setDefaultImageClipDurationMs] = useState(DEFAULT_IMAGE_DURATION_MS);
   const [wallpaper, setWallpaper] = useState<string>(WALLPAPER_PATHS[0]);
+  const [backgroundItems, setBackgroundItems] = useState<BackgroundItem[]>([]);
   const [shadowIntensity, setShadowIntensity] = useState(0);
   const [showBlur, setShowBlur] = useState(false);
+  const [showSafeFrameOverlay, setShowSafeFrameOverlay] = useState(true);
+  const defaultBackgroundBlurAmount = showBlur ? 2 : 0;
   const [motionBlurEnabled, setMotionBlurEnabled] = useState(true);
   const [borderRadius, setBorderRadius] = useState(0);
   const [padding, setPadding] = useState(50);
@@ -184,6 +210,7 @@ export default function VideoEditor() {
   const [audioClips, setAudioClips] = useState<AudioClip[]>([]);
   const [tracks, setTracks] = useState<TimelineTrack[]>([]);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
+  const [selectedBackgroundId, setSelectedBackgroundId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [selectedAudioClipId, setSelectedAudioClipId] = useState<string | null>(null);
   const [trimRegions, setTrimRegions] = useState<TrimRegion[]>([]);
@@ -236,8 +263,10 @@ export default function VideoEditor() {
   const nextAssetIdRef = useRef(1);
   const nextClipZIndexRef = useRef(1);
   const nextTrackIdRef = useRef(1);
+  const nextBackgroundIdRef = useRef(1);
   const exporterRef = useRef<VideoExporter | null>(null);
   const lastVideoPathRef = useRef<string | null>(null);
+  const previousTimelineContentEndRef = useRef(0);
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const mutedTrackIds = useMemo(
     () => new Set(tracks.filter((track) => track.muted).map((track) => track.id)),
@@ -284,7 +313,13 @@ export default function VideoEditor() {
     sourceCursorTrack: CursorTrack | null,
   ) => {
     const defaultTracks: TimelineTrack[] = [];
-    let order = TRACK_ORDER_STEP;
+    let order = 0;
+
+    defaultTracks.push({
+      ...buildBaseTrack(BACKGROUND_TRACK_ID, 'background', 'background', 'Background', order),
+      locked: true,
+    });
+    order += TRACK_ORDER_STEP;
 
     if (sourceVideoClips.some((clip) => clip.applyCamera || clip.assetId === RECORDING_ASSET_ID)) {
       defaultTracks.push(buildBaseTrack('track-recording', 'recording', 'videoClip', 'Recording', order));
@@ -341,6 +376,7 @@ export default function VideoEditor() {
 
   const migrateItemsToTracks = useCallback((
     inputTracks: TimelineTrack[],
+    sourceBackgroundItems: BackgroundItem[],
     sourceVideoClips: VideoClip[],
     sourceAudioClips: AudioClip[],
     sourceZoomRegions: ZoomRegion[],
@@ -370,6 +406,7 @@ export default function VideoEditor() {
         })
         .sort((a, b) => a.order - b.order);
 
+    const backgroundTracks = tracksForItemType('background');
     const recordingTracks = preparedTracks.filter((track) => track.type === 'recording');
     const genericTracks = preparedTracks.filter((track) => isUniversalTrack(track) && track.type !== 'recording').sort((a, b) => a.order - b.order);
     const videoTracks = tracksForItemType('videoClip', { excludeRecording: true });
@@ -404,6 +441,13 @@ export default function VideoEditor() {
         : nextTrackIdFor(videoTracks, `track-video-${++nextVideoIndex}`, videoCursor);
       return { ...clip, trackId };
     });
+
+    const migratedBackgroundItems = sourceBackgroundItems.map((item) => normalizeBackgroundItem({
+      ...item,
+      trackId: item.trackId && preparedTracks.some((track) => track.id === item.trackId)
+        ? item.trackId
+        : (backgroundTracks[0]?.id ?? BACKGROUND_TRACK_ID),
+    }));
 
     const migratedAudioClips = sourceAudioClips.map((clip) => {
       if (clip.trackId && preparedTracks.some((track) => track.id === clip.trackId)) {
@@ -481,6 +525,7 @@ export default function VideoEditor() {
 
     return {
       tracks: preparedTracks,
+      backgroundItems: migratedBackgroundItems,
       videoClips: migratedVideoClips,
       audioClips: migratedAudioClips,
       zoomRegions: migratedZoomRegions,
@@ -533,12 +578,18 @@ export default function VideoEditor() {
     [effectRegions, hiddenTrackIds],
   );
 
+  const visibleBackgroundItems = useMemo(
+    () => backgroundItems.filter((item) => !(item.trackId && hiddenTrackIds.has(item.trackId))),
+    [backgroundItems, hiddenTrackIds],
+  );
+
   const visibleCursorTrack = useMemo(
     () => (cursorTrack && cursorTrack.trackId && hiddenTrackIds.has(cursorTrack.trackId) ? null : cursorTrack),
     [cursorTrack, hiddenTrackIds],
   );
   const timelineContentEndMs = useMemo(() => Math.max(
     Math.round(duration * 1000),
+    ...backgroundItems.map((item) => item.endMs),
     ...videoClips.map((clip) => clip.endMs),
     ...audioClips.map((clip) => clip.endMs),
     ...zoomRegions.map((region) => region.endMs),
@@ -549,6 +600,7 @@ export default function VideoEditor() {
   ), [
     annotationRegions,
     audioClips,
+    backgroundItems,
     duration,
     effectRegions,
     speedRegions,
@@ -557,8 +609,24 @@ export default function VideoEditor() {
     zoomRegions,
   ]);
 
+  const selectedBackground = useMemo(
+    () => (selectedBackgroundId ? backgroundItems.find((item) => item.id === selectedBackgroundId) ?? null : null),
+    [backgroundItems, selectedBackgroundId],
+  );
+
+  const activeBackground = useMemo(
+    () => resolveActiveBackgroundItem(backgroundItems, Math.round(currentTime * 1000)),
+    [backgroundItems, currentTime],
+  );
+
+  const selectedBackgroundSource = useMemo(() => {
+    const source = getBackgroundItemSource(selectedBackground ?? activeBackground, videoAssets);
+    return source ?? wallpaper;
+  }, [activeBackground, selectedBackground, videoAssets, wallpaper]);
+
   useEffect(() => {
     const hasAnyItems =
+      backgroundItems.length > 0 ||
       videoClips.length > 0 ||
       audioClips.length > 0 ||
       zoomRegions.length > 0 ||
@@ -570,6 +638,7 @@ export default function VideoEditor() {
 
     const needsMigration =
       (!tracks.length && hasAnyItems) ||
+      backgroundItems.some((item) => !item.trackId) ||
       videoClips.some((clip) => !clip.trackId) ||
       audioClips.some((clip) => !clip.trackId) ||
       zoomRegions.some((region) => !region.trackId) ||
@@ -585,6 +654,7 @@ export default function VideoEditor() {
 
     const migrated = migrateItemsToTracks(
       tracks,
+      backgroundItems,
       videoClips,
       audioClips,
       zoomRegions,
@@ -596,6 +666,7 @@ export default function VideoEditor() {
     );
 
     setTracks(migrated.tracks);
+    setBackgroundItems(migrated.backgroundItems);
     setVideoClips(migrated.videoClips.map((clip) => withNormalizedClipDuration({
       ...clip,
       playbackRate: clip.playbackRate ?? 1,
@@ -607,7 +678,7 @@ export default function VideoEditor() {
     setAnnotationRegions(migrated.annotationRegions);
     setCursorTrack(migrated.cursorTrack);
     if (migrated.speedRegions) setSpeedRegions(migrated.speedRegions);
-  }, [tracks, videoClips, audioClips, zoomRegions, trimRegions, effectRegions, annotationRegions, speedRegions, cursorTrack, migrateItemsToTracks]);
+  }, [tracks, backgroundItems, videoClips, audioClips, zoomRegions, trimRegions, effectRegions, annotationRegions, speedRegions, cursorTrack, migrateItemsToTracks]);
 
   const ensureTrackForType = useCallback((
     itemType: TimelineTrackItemType,
@@ -657,7 +728,7 @@ export default function VideoEditor() {
     void _itemId;
     void _itemType;
     setTracks((prev) => prev.map((track) => {
-      if (track.id !== trackId || track.type === 'recording') {
+      if (track.id !== trackId || track.type === 'recording' || track.type === 'background') {
         return track;
       }
 
@@ -761,6 +832,7 @@ export default function VideoEditor() {
       zoomRegions,
       effectRegions,
       annotationRegions,
+      backgroundItems,
       videoAssets,
       videoClips,
       audioClips,
@@ -801,13 +873,14 @@ export default function VideoEditor() {
         nextAssetId: nextAssetIdRef.current,
         nextClipZIndex: nextClipZIndexRef.current,
         nextTrackId: nextTrackIdRef.current,
+        nextBackgroundId: nextBackgroundIdRef.current,
       }
     };
 
     return JSON.stringify(project, null, 2);
   }, [
     videoFilePath, duration, zoomRegions, effectRegions,
-    annotationRegions, videoAssets, videoClips, audioClips, tracks, cursorTrack, cursorEnabled, cursorSmoothing,
+    annotationRegions, backgroundItems, videoAssets, videoClips, audioClips, tracks, cursorTrack, cursorEnabled, cursorSmoothing,
     quadraticSmoothingStrength, end2endParams, wallpaper, shadowIntensity,
     showBlur, motionBlurEnabled, borderRadius, padding, paddingKeyframes, cropRegion, screenOffset,
     defaultImageClipDurationMs, aspectRatio, exportQuality
@@ -912,8 +985,36 @@ export default function VideoEditor() {
         resolvedClips = [...recordingClips, ...overlayClips];
       }
 
+      const timelineExtentMs = Math.max(
+        Math.max(0, Math.round((project.videoReference?.duration || 0) * 1000)),
+        ...resolvedClips.map((clip) => clip.endMs),
+        ...resolvedAudioClips.map((clip) => clip.endMs),
+        ...(Array.isArray(project.zoomRegions) ? project.zoomRegions.map((region: ZoomRegion) => region.endMs) : []),
+        ...(Array.isArray(project.trimRegions) ? project.trimRegions.map((region: TrimRegion) => region.endMs) : []),
+        ...(Array.isArray(project.effectRegions) ? project.effectRegions.map((region: EffectRegion) => region.endMs) : []),
+        ...(Array.isArray(project.annotationRegions) ? project.annotationRegions.map((region: AnnotationRegion) => region.endMs) : []),
+        ...(Array.isArray(project.speedRegions) ? project.speedRegions.map((region: SpeedRegion) => region.endMs) : []),
+      );
+      const resolvedBackgroundItems: BackgroundItem[] = Array.isArray(project.backgroundItems) && project.backgroundItems.length > 0
+        ? project.backgroundItems.map((item: BackgroundItem) => normalizeBackgroundItem(item, {
+            defaultBlurAmount: project.showBlur ? 2 : 0,
+          }))
+        : [normalizeBackgroundItem({
+            id: `background-${nextBackgroundIdRef.current++}`,
+            trackId: BACKGROUND_TRACK_ID,
+            startMs: 0,
+            endMs: Math.max(1, timelineExtentMs),
+            kind: inferBackgroundKindFromValue(project.wallpaper || DEFAULT_BACKGROUND_VALUE),
+            value: project.wallpaper || DEFAULT_BACKGROUND_VALUE,
+            fit: 'cover',
+            blurAmount: project.showBlur ? 2 : 0,
+            backdropColor: DEFAULT_BACKGROUND_BACKDROP_COLOR,
+            accentColor: DEFAULT_BACKGROUND_ACCENT_COLOR,
+          })];
+
       const migratedTimeline = migrateItemsToTracks(
         Array.isArray(project.tracks) ? project.tracks : [],
+        resolvedBackgroundItems,
         resolvedClips,
         resolvedAudioClips,
         Array.isArray(project.zoomRegions) ? project.zoomRegions : [],
@@ -924,6 +1025,8 @@ export default function VideoEditor() {
       );
 
       setTracks(migratedTimeline.tracks);
+      setBackgroundItems(migratedTimeline.backgroundItems);
+      setSelectedBackgroundId(null);
       setZoomRegions(migratedTimeline.zoomRegions);
       setTrimRegions(migratedTimeline.trimRegions);
       setEffectRegions(migratedTimeline.effectRegions);
@@ -983,6 +1086,7 @@ export default function VideoEditor() {
         nextAssetIdRef.current = project.idCounters.nextAssetId || nextAssetIdRef.current;
         nextClipZIndexRef.current = project.idCounters.nextClipZIndex || nextClipZIndexRef.current;
         nextTrackIdRef.current = project.idCounters.nextTrackId || nextTrackIdRef.current;
+        nextBackgroundIdRef.current = project.idCounters.nextBackgroundId || nextBackgroundIdRef.current;
       }
 
       setHasUnsavedChanges(false);
@@ -1252,6 +1356,57 @@ export default function VideoEditor() {
     return () => { mounted = false };
   }, []);
 
+  useEffect(() => {
+    if (!videoPath || backgroundItems.length > 0) {
+      return;
+    }
+
+    const endMs = Math.max(1, timelineContentEndMs || Math.round(duration * 1000) || 1);
+    setBackgroundItems([normalizeBackgroundItem({
+      id: `background-${nextBackgroundIdRef.current++}`,
+      trackId: BACKGROUND_TRACK_ID,
+      startMs: 0,
+      endMs,
+      kind: inferBackgroundKindFromValue(wallpaper || DEFAULT_BACKGROUND_VALUE),
+      value: wallpaper || DEFAULT_BACKGROUND_VALUE,
+      fit: 'cover',
+      blurAmount: defaultBackgroundBlurAmount,
+      backdropColor: DEFAULT_BACKGROUND_BACKDROP_COLOR,
+      accentColor: DEFAULT_BACKGROUND_ACCENT_COLOR,
+    })]);
+  }, [backgroundItems.length, defaultBackgroundBlurAmount, duration, timelineContentEndMs, videoPath, wallpaper]);
+
+  useEffect(() => {
+    const previousTimelineEndMs = previousTimelineContentEndRef.current;
+    previousTimelineContentEndRef.current = timelineContentEndMs;
+
+    if (timelineContentEndMs <= previousTimelineEndMs || previousTimelineEndMs <= 0) {
+      return;
+    }
+
+    setBackgroundItems((prev) => {
+      if (!prev.length) {
+        return prev;
+      }
+
+      const next = [...prev];
+      const lastIndex = next.reduce((bestIndex, item, index, items) => (
+        bestIndex === -1 || item.endMs >= items[bestIndex].endMs ? index : bestIndex
+      ), -1);
+      if (lastIndex < 0) {
+        return prev;
+      }
+
+      const lastItem = next[lastIndex];
+      if (Math.abs(lastItem.endMs - previousTimelineEndMs) > 1) {
+        return prev;
+      }
+
+      next[lastIndex] = { ...lastItem, endMs: timelineContentEndMs };
+      return next;
+    });
+  }, [timelineContentEndMs]);
+
   // Track changes for unsaved changes indicator
   useEffect(() => {
     // Skip if no video loaded yet
@@ -1260,7 +1415,7 @@ export default function VideoEditor() {
     // Mark as having unsaved changes whenever state changes
     setHasUnsavedChanges(true);
   }, [
-    videoPath, zoomRegions, effectRegions, annotationRegions, videoAssets, videoClips, audioClips, tracks,
+    videoPath, zoomRegions, effectRegions, annotationRegions, backgroundItems, videoAssets, videoClips, audioClips, tracks,
     cursorTrack, cursorEnabled, cursorSmoothing, wallpaper,
     shadowIntensity, showBlur, motionBlurEnabled, borderRadius,
     padding, cropRegion, screenOffset, aspectRatio, exportQuality
@@ -1425,6 +1580,21 @@ export default function VideoEditor() {
     }
   }, [audioClips, currentTime, hiddenTrackIds, isPlaying, mutedTrackIds, videoAssets]);
 
+  const handleSelectBackground = useCallback((id: string | null) => {
+    setSelectedBackgroundId(id);
+    if (id) {
+      setSelectedTrackId(null);
+      setSelectedClipId(null);
+      setSelectedAudioClipId(null);
+      setSelectedZoomId(null);
+      setSelectedTrimId(null);
+      setSelectedAnnotationId(null);
+      setSelectedCursorId(null);
+      setSelectedEffectId(null);
+      setSelectedSpeedId(null);
+    }
+  }, []);
+
   const handleSelectZoom = useCallback((id: string | null) => {
     setSelectedZoomId(id);
     if (id) setSelectedTrackId(null);
@@ -1433,6 +1603,7 @@ export default function VideoEditor() {
     if (id) setSelectedEffectId(null);
     if (id) setSelectedClipId(null);
     if (id) setSelectedAudioClipId(null);
+    if (id) setSelectedBackgroundId(null);
   }, []);
 
   const handleSelectClip = useCallback((id: string | null) => {
@@ -1445,6 +1616,7 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -1458,6 +1630,7 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -1471,6 +1644,7 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -1484,6 +1658,7 @@ export default function VideoEditor() {
       setSelectedAudioClipId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -1498,6 +1673,7 @@ export default function VideoEditor() {
       setSelectedAudioClipId(null);
       setSelectedCursorId(null);
       setSelectedSpeedId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -1512,6 +1688,7 @@ export default function VideoEditor() {
       setSelectedAudioClipId(null);
       setSelectedCursorId(null);
       setSelectedEffectId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -1526,6 +1703,7 @@ export default function VideoEditor() {
       setSelectedEffectId(null);
       setSelectedSpeedId(null);
       setSelectedCursorId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -1640,9 +1818,23 @@ export default function VideoEditor() {
 
       const clampedStart = Math.max(0, Math.round(span.start));
       const clampedEnd = Math.max(clampedStart + minDuration, Math.round(span.end));
+      const originalDuration = target.endMs - target.startMs;
+      const nextDuration = clampedEnd - clampedStart;
+      const movedAsWholeClip = nextDuration === originalDuration && clampedStart !== target.startMs;
+      const timelineShiftMs = clampedStart - target.startMs;
       return prev.map((clip) => (
         clip.id === id
-          ? { ...clip, startMs: clampedStart, endMs: clampedEnd }
+          ? withNormalizedClipDuration({
+              ...clip,
+              startMs: clampedStart,
+              endMs: clampedEnd,
+              transformKeyframes: movedAsWholeClip
+                ? (clip.transformKeyframes ?? []).map((keyframe) => ({
+                    ...keyframe,
+                    timeMs: Math.max(0, keyframe.timeMs + timelineShiftMs),
+                  }))
+                : clip.transformKeyframes,
+            })
           : clip
       ));
     });
@@ -2554,6 +2746,7 @@ export default function VideoEditor() {
     setVideoAssets((prev) => prev.filter((asset) => asset.id !== assetId));
     setVideoClips((prev) => prev.filter((clip) => clip.assetId !== assetId));
     setAudioClips((prev) => prev.filter((clip) => clip.assetId !== assetId));
+    setBackgroundItems((prev) => prev.filter((item) => item.assetId !== assetId));
     if (selectedClipId) {
       const stillExists = videoClips.some((clip) => clip.id === selectedClipId && clip.assetId !== assetId);
       if (!stillExists) setSelectedClipId(null);
@@ -2562,7 +2755,11 @@ export default function VideoEditor() {
       const stillExists = audioClips.some((clip) => clip.id === selectedAudioClipId && clip.assetId !== assetId);
       if (!stillExists) setSelectedAudioClipId(null);
     }
-  }, [audioClips, videoClips, selectedAudioClipId, selectedClipId]);
+    if (selectedBackgroundId) {
+      const stillExists = backgroundItems.some((item) => item.id === selectedBackgroundId && item.assetId !== assetId);
+      if (!stillExists) setSelectedBackgroundId(null);
+    }
+  }, [audioClips, backgroundItems, videoClips, selectedAudioClipId, selectedBackgroundId, selectedClipId]);
 
   const handleAddClip = useCallback((assetId: string, startOverrideMs?: number, trackOverrideId?: string) => {
     const asset = videoAssets.find((item) => item.id === assetId);
@@ -2630,14 +2827,120 @@ export default function VideoEditor() {
     handleSelectAudioClip(newClip.id);
   }, [videoAssets, currentTime, handleSelectAudioClip, ensureTrackForType, createNamedTrack]);
 
-  const getEditableClipRect = useCallback((clip: VideoClip): InteractionRect | null => {
+  const handleBackgroundSourceChange = useCallback((value: string) => {
+    const fallbackValue = value || DEFAULT_BACKGROUND_VALUE;
+    setWallpaper(fallbackValue);
+    setBackgroundItems((prev) => {
+      const activeItem = resolveActiveBackgroundItem(prev, Math.round(currentTime * 1000));
+      const targetId = selectedBackgroundId ?? activeItem?.id ?? null;
+      const kind = inferBackgroundKindFromValue(fallbackValue);
+
+      if (targetId) {
+        return prev.map((item) => (
+          item.id === targetId
+            ? normalizeBackgroundItem({ ...item, kind, value: fallbackValue, assetId: undefined })
+            : item
+        ));
+      }
+
+      const startMs = Math.max(0, Math.round(currentTime * 1000));
+      const endMs = Math.max(startMs + 1, timelineContentEndMs || Math.round(duration * 1000) || startMs + 3000);
+      const nextItem: BackgroundItem = normalizeBackgroundItem({
+        id: `background-${nextBackgroundIdRef.current++}`,
+        trackId: BACKGROUND_TRACK_ID,
+        startMs,
+        endMs,
+        kind,
+        value: fallbackValue,
+        fit: 'cover',
+        blurAmount: defaultBackgroundBlurAmount,
+        backdropColor: DEFAULT_BACKGROUND_BACKDROP_COLOR,
+        accentColor: DEFAULT_BACKGROUND_ACCENT_COLOR,
+      });
+      setSelectedBackgroundId(nextItem.id);
+      return [...prev, nextItem];
+    });
+  }, [currentTime, defaultBackgroundBlurAmount, duration, selectedBackgroundId, timelineContentEndMs]);
+
+  const handleAddBackgroundAsset = useCallback((assetId: string, startOverrideMs?: number, trackOverrideId?: string) => {
+    const asset = videoAssets.find((candidate) => candidate.id === assetId);
+    if (!asset || asset.kind === 'audio' || asset.id === RECORDING_ASSET_ID) {
+      return;
+    }
+
+    setBackgroundItems((prev) => {
+      const targetId = selectedBackgroundId ?? null;
+      const kind = asset.kind === 'video' || asset.kind === 'recording' ? 'video' : 'image';
+
+      if (targetId) {
+        return prev.map((item) => (
+          item.id === targetId
+            ? normalizeBackgroundItem({ ...item, kind, assetId: asset.id, value: undefined })
+            : item
+        ));
+      }
+
+      const startMs = Math.max(0, Math.round(startOverrideMs ?? currentTime * 1000));
+      const preferredDuration = asset.kind === 'image'
+        ? defaultImageClipDurationMs
+        : asset.durationMs > 0
+          ? asset.durationMs
+          : 3000;
+      const endMs = startMs + Math.max(100, preferredDuration);
+      const nextItem: BackgroundItem = normalizeBackgroundItem({
+        id: `background-${nextBackgroundIdRef.current++}`,
+        trackId: trackOverrideId ?? BACKGROUND_TRACK_ID,
+        startMs,
+        endMs,
+        kind,
+        assetId: asset.id,
+        fit: 'cover',
+        blurAmount: defaultBackgroundBlurAmount,
+        backdropColor: DEFAULT_BACKGROUND_BACKDROP_COLOR,
+        accentColor: DEFAULT_BACKGROUND_ACCENT_COLOR,
+      });
+      setSelectedBackgroundId(nextItem.id);
+      return [...prev, nextItem];
+    });
+  }, [currentTime, defaultBackgroundBlurAmount, defaultImageClipDurationMs, selectedBackgroundId, videoAssets]);
+
+  const handleBackgroundChange = useCallback((id: string, patch: Partial<BackgroundItem>) => {
+    setBackgroundItems((prev) => prev.map((item) => (
+      item.id === id ? normalizeBackgroundItem({ ...item, ...patch }) : item
+    )));
+  }, []);
+
+  const handleBackgroundSpanChange = useCallback((id: string, span: Span) => {
+    setBackgroundItems((prev) => prev.map((item) => (
+      item.id === id
+        ? {
+            ...item,
+            startMs: Math.max(0, Math.round(span.start)),
+            endMs: Math.max(Math.max(0, Math.round(span.start)) + 1, Math.round(span.end)),
+          }
+        : item
+    )));
+  }, []);
+
+  const handleBackgroundDelete = useCallback((id: string) => {
+    setBackgroundItems((prev) => prev.filter((item) => item.id !== id));
+    if (selectedBackgroundId === id) {
+      setSelectedBackgroundId(null);
+    }
+  }, [selectedBackgroundId]);
+
+  const handleBackgroundTrackChange = useCallback((id: string, trackId: string) => {
+    setBackgroundItems((prev) => prev.map((item) => (
+      item.id === id ? { ...item, trackId } : item
+    )));
+  }, []);
+
+  const getEditableClipTransformState = useCallback((clip: VideoClip) => {
+    const currentTimeMs = Math.round(currentTime * 1000);
     if (!isRecordingClip(clip)) {
-      return {
-        x: clip.position.x,
-        y: clip.position.y,
-        width: clip.size.width,
-        height: clip.size.height,
-      };
+      return currentTimeMs >= clip.startMs && currentTimeMs <= clip.endMs
+        ? resolveClipTransformStateAtTime(clip, currentTimeMs)
+        : getBaseClipTransformState(clip);
     }
 
     const sourceVideo = videoPlaybackRef.current?.video;
@@ -2658,19 +2961,71 @@ export default function VideoEditor() {
     });
     if (!currentRect) return null;
 
-    return {
+    const baseState = {
       x: (currentRect.x / stageWidth) * 100,
       y: (currentRect.y / stageHeight) * 100,
       width: (currentRect.width / stageWidth) * 100,
       height: (currentRect.height / stageHeight) * 100,
+      rotationDeg: clip.rotationDeg ?? 0,
+      scale: clip.scale ?? 1,
+      opacity: clip.opacity ?? 1,
     };
-  }, [isRecordingClip, aspectRatio, cropRegion, currentPadding, screenOffset]);
+
+    if (
+      clip.transformKeyframes?.length &&
+      currentTimeMs >= clip.startMs &&
+      currentTimeMs <= clip.endMs
+    ) {
+      return resolveClipTransformStateFromBase(baseState, clip.transformKeyframes, currentTimeMs);
+    }
+
+    return baseState;
+  }, [isRecordingClip, currentTime, aspectRatio, cropRegion, currentPadding, screenOffset]);
+
+  const getEditableClipRect = useCallback((clip: VideoClip): InteractionRect | null => {
+    const state = getEditableClipTransformState(clip);
+    if (!state) return null;
+    return {
+      x: state.x,
+      y: state.y,
+      width: state.width,
+      height: state.height,
+    };
+  }, [getEditableClipTransformState]);
 
   const handleClipRectChange = useCallback((id: string, rect: InteractionRect) => {
     const clip = videoClips.find((item) => item.id === id);
     if (!clip) return;
+    const currentTimeMs = Math.round(currentTime * 1000);
 
     if (isRecordingClip(clip)) {
+      const shouldWriteTransformKeyframe = Boolean(
+        clip.transformKeyframes?.length &&
+        currentTimeMs >= clip.startMs &&
+        currentTimeMs <= clip.endMs,
+      );
+      if (shouldWriteTransformKeyframe) {
+        const currentState = getEditableClipTransformState(clip);
+        if (!currentState) return;
+        setVideoClips((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? withNormalizedClipDuration({
+                  ...item,
+                  transformKeyframes: upsertClipTransformKeyframe(item, currentTimeMs, {
+                    ...currentState,
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                  }),
+                })
+              : item,
+          ),
+        );
+        return;
+      }
+
       const sourceVideo = videoPlaybackRef.current?.video;
       const sourceWidth = sourceVideo?.videoWidth || 0;
       const sourceHeight = sourceVideo?.videoHeight || 0;
@@ -2701,18 +3056,37 @@ export default function VideoEditor() {
       return;
     }
 
+    const shouldWriteTransformKeyframe = Boolean(
+      clip.transformKeyframes?.length &&
+      currentTimeMs >= clip.startMs &&
+      currentTimeMs <= clip.endMs,
+    );
+
     setVideoClips((prev) =>
       prev.map((item) =>
         item.id === id
-          ? {
-              ...item,
-              position: { x: rect.x, y: rect.y },
-              size: { width: rect.width, height: rect.height },
-            }
+          ? withNormalizedClipDuration(
+              shouldWriteTransformKeyframe
+                ? {
+                    ...item,
+                    transformKeyframes: upsertClipTransformKeyframe(item, currentTimeMs, {
+                      ...resolveClipTransformStateAtTime(item, currentTimeMs),
+                      x: rect.x,
+                      y: rect.y,
+                      width: rect.width,
+                      height: rect.height,
+                    }),
+                  }
+                : {
+                    ...item,
+                    position: { x: rect.x, y: rect.y },
+                    size: { width: rect.width, height: rect.height },
+                  },
+            )
           : item,
       ),
     );
-  }, [videoClips, isRecordingClip, aspectRatio, cropRegion, currentPadding, screenOffset]);
+  }, [videoClips, currentTime, isRecordingClip, aspectRatio, cropRegion, currentPadding, screenOffset, getEditableClipTransformState]);
 
   const handleClipPositionChange = useCallback((id: string, position: { x: number; y: number }) => {
     const clip = videoClips.find((item) => item.id === id);
@@ -2739,16 +3113,113 @@ export default function VideoEditor() {
   }, [videoClips, getEditableClipRect, handleClipRectChange]);
 
   const handleClipChange = useCallback((id: string, patch: Partial<VideoClip>) => {
+    const currentTimeMs = Math.round(currentTime * 1000);
     setVideoClips((prev) =>
       prev.map((clip) =>
         clip.id === id
-          ? withNormalizedClipDuration({
-              ...clip,
-              ...patch,
-              playbackRate: patch.playbackRate ?? clip.playbackRate ?? 1,
-            })
+          ? (() => {
+              const includesAnimatedTransformPatch =
+                typeof patch.rotationDeg === 'number' ||
+                typeof patch.scale === 'number' ||
+                typeof patch.opacity === 'number';
+              const shouldWriteTransformKeyframe = (
+                includesAnimatedTransformPatch &&
+                Boolean(clip.transformKeyframes?.length) &&
+                currentTimeMs >= clip.startMs &&
+                currentTimeMs <= clip.endMs
+              );
+
+              if (shouldWriteTransformKeyframe) {
+                const { rotationDeg, scale, opacity, ...restPatch } = patch;
+                const currentState = getEditableClipTransformState(clip) ?? resolveClipTransformStateAtTime(clip, currentTimeMs);
+                return withNormalizedClipDuration({
+                  ...clip,
+                  ...restPatch,
+                  playbackRate: patch.playbackRate ?? clip.playbackRate ?? 1,
+                  transformKeyframes: upsertClipTransformKeyframe(clip, currentTimeMs, {
+                    ...currentState,
+                    rotationDeg: typeof rotationDeg === 'number' ? rotationDeg : currentState.rotationDeg,
+                    scale: typeof scale === 'number' ? scale : currentState.scale,
+                    opacity: typeof opacity === 'number' ? opacity : currentState.opacity,
+                  }),
+                });
+              }
+
+              return withNormalizedClipDuration({
+                ...clip,
+                ...patch,
+                playbackRate: patch.playbackRate ?? clip.playbackRate ?? 1,
+              });
+            })()
           : clip,
       ),
+    );
+  }, [currentTime, isRecordingClip]);
+
+  const handleClipTransformKeyframeAddOrUpdate = useCallback((id: string) => {
+    const clip = videoClips.find((item) => item.id === id);
+    if (!clip) return;
+
+    const currentTimeMs = Math.round(currentTime * 1000);
+    if (currentTimeMs < clip.startMs || currentTimeMs > clip.endMs) {
+      return;
+    }
+
+    const currentState = getEditableClipTransformState(clip);
+    if (!currentState) return;
+
+    setVideoClips((prev) =>
+      prev.map((item) => (
+        item.id === id
+          ? withNormalizedClipDuration({
+              ...item,
+              transformKeyframes: upsertClipTransformKeyframe(item, currentTimeMs, currentState),
+            })
+          : item
+      )),
+    );
+  }, [videoClips, currentTime, getEditableClipTransformState]);
+
+  const handleClipTransformKeyframeDelete = useCallback((id: string, keyframeId: string) => {
+    setVideoClips((prev) =>
+      prev.map((item) => (
+        item.id === id
+          ? withNormalizedClipDuration({
+              ...item,
+              transformKeyframes: (item.transformKeyframes ?? []).filter((keyframe) => keyframe.id !== keyframeId),
+            })
+          : item
+      )),
+    );
+  }, []);
+
+  const handleClipTransformKeyframeCurveChange = useCallback((id: string, keyframeId: string, curveToNext: { x1: number; y1: number; x2: number; y2: number }) => {
+    setVideoClips((prev) =>
+      prev.map((item) => (
+        item.id === id
+          ? withNormalizedClipDuration({
+              ...item,
+              transformKeyframes: (item.transformKeyframes ?? []).map((keyframe) => (
+                keyframe.id === keyframeId
+                  ? { ...keyframe, curveToNext }
+                  : keyframe
+              )),
+            })
+          : item
+      )),
+    );
+  }, []);
+
+  const handleClipTransformKeyframesClear = useCallback((id: string) => {
+    setVideoClips((prev) =>
+      prev.map((item) => (
+        item.id === id
+          ? withNormalizedClipDuration({
+              ...item,
+              transformKeyframes: undefined,
+            })
+          : item
+      )),
     );
   }, []);
 
@@ -2762,7 +3233,11 @@ export default function VideoEditor() {
 
   const handleTrackOrderChange = useCallback((sourceTrackId: string, targetTrackId: string, placement: 'before' | 'after') => {
     setTracks((prev) => {
-      if (sourceTrackId === targetTrackId) {
+      if (
+        sourceTrackId === targetTrackId ||
+        sourceTrackId === BACKGROUND_TRACK_ID ||
+        targetTrackId === BACKGROUND_TRACK_ID
+      ) {
         return prev;
       }
 
@@ -2802,6 +3277,11 @@ export default function VideoEditor() {
   }, []);
 
   const handleTrackDelete = useCallback((trackId: string) => {
+    if (trackId === BACKGROUND_TRACK_ID) {
+      return;
+    }
+
+    const deletedBackgroundIds = new Set(backgroundItems.filter((item) => item.trackId === trackId).map((item) => item.id));
     const deletedClipIds = new Set(videoClips.filter((clip) => clip.trackId === trackId).map((clip) => clip.id));
     const deletedAudioIds = new Set(audioClips.filter((clip) => clip.trackId === trackId).map((clip) => clip.id));
     const deletedZoomIds = new Set(zoomRegions.filter((region) => region.trackId === trackId).map((region) => region.id));
@@ -2812,6 +3292,7 @@ export default function VideoEditor() {
     const deletesCursorTrack = cursorTrack?.trackId === trackId;
 
     setTracks((prev) => prev.filter((track) => track.id !== trackId));
+    setBackgroundItems((prev) => prev.filter((item) => item.trackId !== trackId));
     setVideoClips((prev) => prev.filter((clip) => clip.trackId !== trackId));
     setAudioClips((prev) => prev.filter((clip) => clip.trackId !== trackId));
     setZoomRegions((prev) => prev.filter((region) => region.trackId !== trackId));
@@ -2827,6 +3308,9 @@ export default function VideoEditor() {
 
     if (selectedClipId && deletedClipIds.has(selectedClipId)) {
       setSelectedClipId(null);
+    }
+    if (selectedBackgroundId && deletedBackgroundIds.has(selectedBackgroundId)) {
+      setSelectedBackgroundId(null);
     }
     if (selectedAudioClipId && deletedAudioIds.has(selectedAudioClipId)) {
       setSelectedAudioClipId(null);
@@ -2852,10 +3336,12 @@ export default function VideoEditor() {
   }, [
     annotationRegions,
     audioClips,
+    backgroundItems,
     cursorTrack,
     effectRegions,
     selectedAnnotationId,
     selectedAudioClipId,
+    selectedBackgroundId,
     selectedClipId,
     selectedEffectId,
     selectedTrackId,
@@ -2941,6 +3427,7 @@ export default function VideoEditor() {
       setSelectedAnnotationId(null);
       setSelectedEffectId(null);
       setSelectedClipId(null);
+      setSelectedBackgroundId(null);
     }
   }, []);
 
@@ -2995,6 +3482,12 @@ export default function VideoEditor() {
       setSelectedZoomId(null);
     }
   }, [selectedZoomId, zoomRegions]);
+
+  useEffect(() => {
+    if (selectedBackgroundId && !backgroundItems.some((item) => item.id === selectedBackgroundId)) {
+      setSelectedBackgroundId(null);
+    }
+  }, [backgroundItems, selectedBackgroundId]);
 
   useEffect(() => {
     if (selectedClipId && !videoClips.some((clip) => clip.id === selectedClipId)) {
@@ -3182,6 +3675,7 @@ export default function VideoEditor() {
         bitrate,
         codec: 'avc1.640033',
         wallpaper,
+        backgroundItems: visibleBackgroundItems,
         zoomRegions,
         trimRegions,
         showShadow: shadowIntensity > 0,
@@ -3239,7 +3733,7 @@ export default function VideoEditor() {
       setIsExporting(false);
       exporterRef.current = null;
     }
-  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, paddingKeyframes, cropRegion, screenOffset, visibleAnnotationRegions, videoAssets, visibleVideoClips, visibleEffectRegions, isPlaying, aspectRatio, resolutionPresetId, exportQuality]);
+  }, [videoPath, wallpaper, visibleBackgroundItems, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, paddingKeyframes, cropRegion, screenOffset, visibleAnnotationRegions, videoAssets, visibleVideoClips, visibleEffectRegions, isPlaying, aspectRatio, resolutionPresetId, exportQuality]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {
@@ -3303,6 +3797,7 @@ export default function VideoEditor() {
     setError(null);
 
     // Reset all editing state
+    setBackgroundItems([]);
     setVideoClips([]);
     setAudioClips([]);
     setTracks([]);
@@ -3311,6 +3806,7 @@ export default function VideoEditor() {
     setAnnotationRegions([]);
     setSpeedRegions([]);
     setSelectedSpeedId(null);
+    setSelectedBackgroundId(null);
     setVideoAssets([]);
     setSelectedClipId(null);
     setSelectedAudioClipId(null);
@@ -3330,6 +3826,7 @@ export default function VideoEditor() {
     nextAssetIdRef.current = 1;
     nextClipZIndexRef.current = 1;
     nextTrackIdRef.current = 1;
+    nextBackgroundIdRef.current = 1;
 
     toast.success('New project created');
   }, [toFileUrl]);
@@ -3486,6 +3983,7 @@ export default function VideoEditor() {
                       onPlayStateChange={setIsPlaying}
                       onError={setError}
                       wallpaper={wallpaper}
+                      backgroundItems={visibleBackgroundItems}
                       zoomRegions={zoomRegions}
                       selectedZoomId={selectedZoomId}
                       onSelectZoom={handleSelectZoom}
@@ -3494,6 +3992,7 @@ export default function VideoEditor() {
                       showShadow={shadowIntensity > 0}
                       shadowIntensity={shadowIntensity}
                       showBlur={showBlur}
+                      showSafeFrameOverlay={showSafeFrameOverlay}
                       motionBlurEnabled={motionBlurEnabled}
                       borderRadius={borderRadius}
                       padding={currentPadding}
@@ -3559,10 +4058,18 @@ export default function VideoEditor() {
                   onTrackDelete={handleTrackDelete}
                   onTrackAutoTypeChange={handleTrackAutoTypeChange}
                   onCreateTrack={handleCreateTrack}
+                  backgroundItems={backgroundItems}
+                  onBackgroundSpanChange={handleBackgroundSpanChange}
+                  onBackgroundDelete={handleBackgroundDelete}
+                  onBackgroundTrackChange={handleBackgroundTrackChange}
+                  selectedBackgroundId={selectedBackgroundId}
+                  onSelectBackground={handleSelectBackground}
                   videoClips={videoClips}
                   audioClips={audioClips}
                   onClipSpanChange={handleClipSpanChange}
                   onClipChange={handleClipChange}
+                  onClipTransformKeyframeAddOrUpdate={handleClipTransformKeyframeAddOrUpdate}
+                  onClipTransformKeyframeDelete={handleClipTransformKeyframeDelete}
                   onAudioClipSpanChange={handleAudioClipSpanChange}
                   onClipSplit={handleClipSplit}
                   onClipDelete={handleClipDelete}
@@ -3610,6 +4117,7 @@ export default function VideoEditor() {
                   onSelectSpeed={handleSelectSpeed}
                   videoAssets={videoAssets}
                   onClipAssetDrop={handleAddClip}
+                  onBackgroundAssetDrop={handleAddBackgroundAsset}
                   onAudioAssetDrop={handleAddAudioClip}
                   onClipOrderChange={handleClipOrderChange}
                   cursorTrack={cursorTrack}
@@ -3633,8 +4141,8 @@ export default function VideoEditor() {
 
         {/* Right section: settings panel */}
         <SettingsPanel
-          selected={wallpaper}
-          onWallpaperChange={setWallpaper}
+          selected={selectedBackgroundSource}
+          onWallpaperChange={handleBackgroundSourceChange}
           selectedTrack={selectedTrack}
           onTrackNameChange={handleTrackNameChange}
           onTrackHeightChange={handleTrackHeightChange}
@@ -3642,6 +4150,8 @@ export default function VideoEditor() {
           onTrackMuteChange={handleTrackMuteChange}
           onTrackDelete={handleTrackDelete}
           onAddItemToTrack={handleAddItemToTrack}
+          backgroundItems={backgroundItems}
+          selectedBackgroundId={selectedBackgroundId}
           selectedZoomDepth={selectedZoomId ? zoomRegions.find(z => z.id === selectedZoomId)?.depth : null}
           onZoomDepthChange={(depth) => selectedZoomId && handleZoomDepthChange(depth)}
           selectedZoomId={selectedZoomId}
@@ -3652,6 +4162,8 @@ export default function VideoEditor() {
           onShadowChange={setShadowIntensity}
           showBlur={showBlur}
           onBlurChange={setShowBlur}
+          showSafeFrameOverlay={showSafeFrameOverlay}
+          onShowSafeFrameOverlayChange={setShowSafeFrameOverlay}
           motionBlurEnabled={motionBlurEnabled}
           onMotionBlurChange={setMotionBlurEnabled}
           borderRadius={borderRadius}
@@ -3671,11 +4183,18 @@ export default function VideoEditor() {
           selectedClipId={selectedClipId}
           onVideoAssetAdd={handleAddMediaAssets}
           onVideoAssetRemove={handleRemoveVideoAsset}
+          onBackgroundChange={handleBackgroundChange}
+          onBackgroundDelete={handleBackgroundDelete}
+          onBackgroundAssetAdd={handleAddBackgroundAsset}
           onClipAddToTimeline={handleAddClip}
           onAudioAddToTimeline={handleAddAudioClip}
           defaultImageClipDurationMs={defaultImageClipDurationMs}
           onDefaultImageClipDurationMsChange={setDefaultImageClipDurationMs}
           onClipChange={handleClipChange}
+          onClipTransformKeyframeAddOrUpdate={handleClipTransformKeyframeAddOrUpdate}
+          onClipTransformKeyframeDelete={handleClipTransformKeyframeDelete}
+          onClipTransformKeyframeCurveChange={handleClipTransformKeyframeCurveChange}
+          onClipTransformKeyframesClear={handleClipTransformKeyframesClear}
           onClipRectChange={handleClipRectChange}
           cropRegion={cropRegion}
           onCropChange={setCropRegion}

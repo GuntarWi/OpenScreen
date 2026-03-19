@@ -11,10 +11,12 @@ interface LayoutParams {
   lockedVideoDimensions?: { width: number; height: number } | null;
   borderRadius?: number;
   padding?: number;
+  workspaceScale?: number;
 }
 
 interface LayoutResult {
   stageSize: { width: number; height: number };
+  stageOffset: { x: number; y: number };
   videoSize: { width: number; height: number };
   baseScale: number;
   baseOffset: { x: number; y: number };
@@ -23,7 +25,18 @@ interface LayoutResult {
 }
 
 export function layoutVideoContent(params: LayoutParams): LayoutResult | null {
-  const { container, app, videoSprite, maskGraphics, videoElement, cropRegion, lockedVideoDimensions, borderRadius = 0, padding = 0 } = params;
+  const {
+    container,
+    app,
+    videoSprite,
+    maskGraphics,
+    videoElement,
+    cropRegion,
+    lockedVideoDimensions,
+    borderRadius = 0,
+    padding = 0,
+    workspaceScale = 1,
+  } = params;
 
   const videoWidth = lockedVideoDimensions?.width || videoElement.videoWidth;
   const videoHeight = lockedVideoDimensions?.height || videoElement.videoHeight;
@@ -43,6 +56,12 @@ export function layoutVideoContent(params: LayoutParams): LayoutResult | null {
   app.canvas.style.width = '100%';
   app.canvas.style.height = '100%';
 
+  const clampedWorkspaceScale = Math.max(0.5, Math.min(1, workspaceScale));
+  const stageWidth = width * clampedWorkspaceScale;
+  const stageHeight = height * clampedWorkspaceScale;
+  const stageOffsetX = (width - stageWidth) / 2;
+  const stageOffsetY = (height - stageHeight) / 2;
+
   // Apply crop region
   const crop = cropRegion || { x: 0, y: 0, width: 1, height: 1 };
   
@@ -58,8 +77,8 @@ export function layoutVideoContent(params: LayoutParams): LayoutResult | null {
   // Calculate scale to fit the cropped area in the viewport
   // Padding is a percentage (0-100), where 50 matches the original VIEWPORT_SCALE of 0.8
   const paddingScale = 1.0 - (padding / 100) * 0.4;
-  const maxDisplayWidth = width * paddingScale;
-  const maxDisplayHeight = height * paddingScale;
+  const maxDisplayWidth = stageWidth * paddingScale;
+  const maxDisplayHeight = stageHeight * paddingScale;
 
   const scale = Math.min(
     maxDisplayWidth / croppedVideoWidth,
@@ -77,9 +96,9 @@ export function layoutVideoContent(params: LayoutParams): LayoutResult | null {
   const croppedDisplayWidth = croppedVideoWidth * scale;
   const croppedDisplayHeight = croppedVideoHeight * scale;
 
-  // Center the cropped region in the container
-  const centerOffsetX = (width - croppedDisplayWidth) / 2;
-  const centerOffsetY = (height - croppedDisplayHeight) / 2;
+  // Center the cropped region inside the logical stage.
+  const centerOffsetX = (stageWidth - croppedDisplayWidth) / 2;
+  const centerOffsetY = (stageHeight - croppedDisplayHeight) / 2;
   
   // Position the full video sprite so that when we apply the mask,
   // the cropped region appears centered
@@ -101,7 +120,8 @@ export function layoutVideoContent(params: LayoutParams): LayoutResult | null {
   maskGraphics.fill({ color: 0xffffff });
 
   return {
-    stageSize: { width, height },
+    stageSize: { width: stageWidth, height: stageHeight },
+    stageOffset: { x: stageOffsetX, y: stageOffsetY },
     videoSize: { width: croppedVideoWidth, height: croppedVideoHeight },
     baseScale: scale,
     baseOffset: { x: spriteX, y: spriteY },

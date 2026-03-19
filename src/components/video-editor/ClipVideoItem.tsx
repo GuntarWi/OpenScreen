@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { VideoClip } from "./types";
 import type { ClipInteractionRect } from "./videoPlayback/clipPixiRenderer";
 import type { InteractionRect } from "@/utils/recordingInteractionLayout";
+import { resolveClipTransformStateAtTime } from "@/utils/clipTransformKeyframes";
 
 interface ClipVideoItemProps {
   region: VideoClip;
@@ -86,13 +87,17 @@ export function ClipVideoItem({
   const wasVisibleRef = useRef(false);
 
   const anchor = region.anchor ?? { x: 0, y: 0 };
-  const scale = Math.max(0.01, region.scale ?? 1);
-  const rotationDeg = region.rotationDeg ?? 0;
+  const transformState = resolveClipTransformStateAtTime(
+    region,
+    Math.min(Math.max(currentTimeMs, region.startMs), region.endMs),
+  );
+  const scale = Math.max(0.01, transformState.scale);
+  const rotationDeg = transformState.rotationDeg;
   const selectionRect = interactionRect ?? {
-    x: (region.position.x / 100) * containerWidth,
-    y: (region.position.y / 100) * containerHeight,
-    width: (region.size.width / 100) * containerWidth,
-    height: (region.size.height / 100) * containerHeight,
+    x: (transformState.x / 100) * containerWidth,
+    y: (transformState.y / 100) * containerHeight,
+    width: (transformState.width / 100) * containerWidth,
+    height: (transformState.height / 100) * containerHeight,
   };
   const selectionBaseX = selectionRect.x;
   const selectionBaseY = selectionRect.y;

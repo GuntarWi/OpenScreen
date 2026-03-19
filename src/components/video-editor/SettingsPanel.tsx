@@ -1,6 +1,8 @@
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAssetPath } from "@/lib/assetPath";
+import { RetroGrid } from "@/components/ui/retro-grid";
+import { Ripple } from "@/components/ui/ripple";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,8 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import Block from '@uiw/react-color-block';
 import { Trash2, Download, Crop, X, Bug, Upload, Star } from "lucide-react";
 import { toast } from "sonner";
+import { BezierCurveEditor } from "./BezierCurveEditor";
 import { RECORDING_ASSET_ID } from "./types";
-import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion, SpeedRegion, ScreenOffset, VideoAsset, VideoClip, AudioClip, VideoClipFit, VideoClipEffect, PaddingKeyframe, TimelineTrack, ZoomRegion, TrimRegion } from "./types";
+import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion, SpeedRegion, ScreenOffset, VideoAsset, VideoClip, AudioClip, VideoClipFit, VideoClipEffect, PaddingKeyframe, TimelineTrack, ZoomRegion, TrimRegion, BackgroundItem, BackgroundFit, ClipTransformBezier } from "./types";
 import { CropControl } from "./CropControl";
 import { KeyboardShortcutsHelp } from "./KeyboardShortcutsHelp";
 import { AnnotationSettingsPanel } from "./AnnotationSettingsPanel";
@@ -19,6 +22,28 @@ import { SpeedSettingsPanel } from "./SpeedSettingsPanel";
 import { getAspectRatioValue, type AspectRatio } from "@/utils/aspectRatioUtils";
 import type { ExportQuality } from "@/lib/exporter";
 import { resolveRecordingVisibleRect, type InteractionRect } from "@/utils/recordingInteractionLayout";
+import {
+  CLIP_TRANSFORM_POSITION_RANGE,
+  CLIP_TRANSFORM_SIZE_RANGE,
+  findClipTransformKeyframeAtTime,
+  getBaseClipTransformState,
+  LINEAR_BEZIER,
+  resolveClipTransformStateAtTime,
+  resolveClipTransformStateFromBase,
+} from "@/utils/clipTransformKeyframes";
+import {
+  DEFAULT_BACKGROUND_ACCENT_COLOR,
+  DEFAULT_BACKGROUND_BACKDROP_COLOR,
+  DEFAULT_RETRO_GRID_ANGLE,
+  DEFAULT_RETRO_GRID_DENSITY,
+  DEFAULT_RIPPLE_COUNT,
+  DEFAULT_RIPPLE_SPEED,
+  getRetroGridCellSize,
+  getRippleAnimationDurationSeconds,
+  MAGICUI_RETRO_GRID_VALUE,
+  MAGICUI_RIPPLE_VALUE,
+  resolveActiveBackgroundItem,
+} from "./backgroundUtils";
 
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_RELATIVE = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `wallpapers/wallpaper${i + 1}.jpg`);
@@ -62,6 +87,8 @@ interface SettingsPanelProps {
   onShadowChange?: (intensity: number) => void;
   showBlur?: boolean;
   onBlurChange?: (showBlur: boolean) => void;
+  showSafeFrameOverlay?: boolean;
+  onShowSafeFrameOverlayChange?: (show: boolean) => void;
   motionBlurEnabled?: boolean;
   onMotionBlurChange?: (enabled: boolean) => void;
   borderRadius?: number;
@@ -83,16 +110,25 @@ interface SettingsPanelProps {
   onAddItemToTrack?: (trackId: string) => void;
   videoClips?: VideoClip[];
   audioClips?: AudioClip[];
+  backgroundItems?: BackgroundItem[];
   zoomRegions?: ZoomRegion[];
   trimRegions?: TrimRegion[];
+  selectedBackgroundId?: string | null;
   selectedClipId?: string | null;
   onVideoAssetAdd?: () => void;
   onVideoAssetRemove?: (id: string) => void;
+  onBackgroundChange?: (id: string, patch: Partial<BackgroundItem>) => void;
+  onBackgroundDelete?: (id: string) => void;
+  onBackgroundAssetAdd?: (assetId: string) => void;
   onClipAddToTimeline?: (assetId: string) => void;
   onAudioAddToTimeline?: (assetId: string) => void;
   defaultImageClipDurationMs?: number;
   onDefaultImageClipDurationMsChange?: (durationMs: number) => void;
   onClipChange?: (id: string, patch: Partial<VideoClip>) => void;
+  onClipTransformKeyframeAddOrUpdate?: (id: string) => void;
+  onClipTransformKeyframeDelete?: (id: string, keyframeId: string) => void;
+  onClipTransformKeyframeCurveChange?: (id: string, keyframeId: string, curveToNext: ClipTransformBezier) => void;
+  onClipTransformKeyframesClear?: (id: string) => void;
   onClipRectChange?: (id: string, rect: InteractionRect) => void;
   cropRegion?: CropRegion;
   onCropChange?: (region: CropRegion) => void;
@@ -164,6 +200,8 @@ export function SettingsPanel({
   onShadowChange, 
   showBlur, 
   onBlurChange, 
+  showSafeFrameOverlay = false,
+  onShowSafeFrameOverlayChange,
   motionBlurEnabled = true, 
   onMotionBlurChange, 
   borderRadius = 0, 
@@ -184,16 +222,25 @@ export function SettingsPanel({
   onAddItemToTrack,
   videoClips = [],
   audioClips = [],
+  backgroundItems = [],
   zoomRegions = [],
   trimRegions = [],
+  selectedBackgroundId,
   selectedClipId,
   onVideoAssetAdd,
   onVideoAssetRemove,
+  onBackgroundChange,
+  onBackgroundDelete,
+  onBackgroundAssetAdd,
   onClipAddToTimeline,
   onAudioAddToTimeline,
   defaultImageClipDurationMs = 3000,
   onDefaultImageClipDurationMsChange,
   onClipChange,
+  onClipTransformKeyframeAddOrUpdate,
+  onClipTransformKeyframeDelete,
+  onClipTransformKeyframeCurveChange,
+  onClipTransformKeyframesClear,
   onClipRectChange,
   cropRegion,
   onCropChange, 
@@ -291,6 +338,27 @@ export function SettingsPanel({
     (clip) => !(clip.applyCamera || clip.assetId === RECORDING_ASSET_ID),
   ).length;
   const audioClipCount = audioClips.length;
+  const selectedBackground = selectedBackgroundId
+    ? backgroundItems.find((item) => item.id === selectedBackgroundId) ?? null
+    : null;
+  const activeBackgroundAtPlayhead = useMemo(
+    () => resolveActiveBackgroundItem(backgroundItems, Math.round((currentTime ?? 0) * 1000)),
+    [backgroundItems, currentTime],
+  );
+  const inspectedBackground = selectedBackground ?? activeBackgroundAtPlayhead;
+  const selectedMagicBackdropColor = inspectedBackground?.kind === 'preset'
+    ? inspectedBackground.backdropColor ?? DEFAULT_BACKGROUND_BACKDROP_COLOR
+    : DEFAULT_BACKGROUND_BACKDROP_COLOR;
+  const selectedMagicAccentColor = inspectedBackground?.kind === 'preset'
+    ? inspectedBackground.accentColor ?? DEFAULT_BACKGROUND_ACCENT_COLOR
+    : DEFAULT_BACKGROUND_ACCENT_COLOR;
+  const inspectedPresetValue = inspectedBackground?.kind === 'preset' ? (inspectedBackground.value ?? null) : null;
+  const inspectedIsRetroGrid = inspectedPresetValue === MAGICUI_RETRO_GRID_VALUE;
+  const inspectedIsRipple = inspectedPresetValue === MAGICUI_RIPPLE_VALUE;
+  const selectedRetroGridAngle = inspectedBackground?.retroGridAngle ?? DEFAULT_RETRO_GRID_ANGLE;
+  const selectedRetroGridDensity = inspectedBackground?.retroGridDensity ?? DEFAULT_RETRO_GRID_DENSITY;
+  const selectedRippleSpeed = inspectedBackground?.rippleSpeed ?? DEFAULT_RIPPLE_SPEED;
+  const selectedRippleCount = inspectedBackground?.rippleCount ?? DEFAULT_RIPPLE_COUNT;
   const selectedClip = selectedClipId
     ? videoClips.find((clip) => clip.id === selectedClipId) ?? null
     : null;
@@ -303,15 +371,24 @@ export function SettingsPanel({
   const selectedClipUsesScreenRoundness = Boolean(
     selectedClip && (selectedClipIsRecording || selectedClipAsset?.kind === 'recording'),
   );
-  const selectedClipPlacement = useMemo(() => {
-    if (!selectedClip) return null;
+  const currentTimeMs = Math.round((currentTime ?? 0) * 1000);
+  const selectedClipTransformKeyframe = selectedClip
+    ? findClipTransformKeyframeAtTime(selectedClip.transformKeyframes, currentTimeMs)
+    : null;
+  const canEditSelectedClipTransformKeyframes = Boolean(
+    selectedClip &&
+    currentTimeMs >= selectedClip.startMs &&
+    currentTimeMs <= selectedClip.endMs,
+  );
+  const selectedClipTransformState = useMemo(() => {
+    if (!selectedClip) {
+      return null;
+    }
+
     if (!selectedClipIsRecording) {
-      return {
-        x: selectedClip.position.x,
-        y: selectedClip.position.y,
-        width: selectedClip.size.width,
-        height: selectedClip.size.height,
-      };
+      return canEditSelectedClipTransformKeyframes
+        ? resolveClipTransformStateAtTime(selectedClip, currentTimeMs)
+        : getBaseClipTransformState(selectedClip);
     }
 
     const sourceWidth = videoElement?.videoWidth || 0;
@@ -333,13 +410,31 @@ export function SettingsPanel({
     });
     if (!rect) return null;
 
-    return {
+    const baseState = {
       x: (rect.x / stageWidth) * 100,
       y: (rect.y / stageHeight) * 100,
       width: (rect.width / stageWidth) * 100,
       height: (rect.height / stageHeight) * 100,
+      rotationDeg: selectedClip.rotationDeg ?? 0,
+      scale: selectedClip.scale ?? 1,
+      opacity: selectedClip.opacity ?? 1,
     };
-  }, [selectedClip, selectedClipIsRecording, videoElement, aspectRatio, cropRegion, padding, screenOffset]);
+
+    return canEditSelectedClipTransformKeyframes && selectedClip.transformKeyframes?.length
+      ? resolveClipTransformStateFromBase(baseState, selectedClip.transformKeyframes, currentTimeMs)
+      : baseState;
+  }, [selectedClip, selectedClipIsRecording, canEditSelectedClipTransformKeyframes, currentTimeMs, videoElement, aspectRatio, cropRegion, padding, screenOffset]);
+  const selectedClipPlacement = useMemo(() => {
+    if (selectedClipTransformState) {
+      return {
+        x: selectedClipTransformState.x,
+        y: selectedClipTransformState.y,
+        width: selectedClipTransformState.width,
+        height: selectedClipTransformState.height,
+      };
+    }
+    return null;
+  }, [selectedClipTransformState]);
 
   const updateSelectedClipPlacement = useCallback((patch: Partial<InteractionRect>) => {
     if (!selectedClip || !selectedClipPlacement) return;
@@ -368,11 +463,22 @@ export function SettingsPanel({
     }
   }, [selectedClip, selectedClipPlacement, onClipRectChange, onClipChange, selectedClipIsRecording]);
 
+  const updateSelectedClipTransform = useCallback((patch: Partial<Pick<VideoClip, "rotationDeg" | "scale" | "opacity">>) => {
+    if (!selectedClip || !onClipChange) return;
+    onClipChange(selectedClip.id, patch);
+  }, [selectedClip, onClipChange]);
+
   useEffect(() => {
     if (selectedClip) {
       setActiveTab('clips');
     }
   }, [selectedClip]);
+
+  useEffect(() => {
+    if (selectedBackground) {
+      setActiveTab('screen');
+    }
+  }, [selectedBackground]);
   // Local follow state to allow toggling even if parent doesn't pass handler
   const [zoomFollowEnabledLocal, setZoomFollowEnabledLocal] = useState<boolean>(Boolean((zoomFollowEnabled as boolean) || false));
   useEffect(() => {
@@ -509,6 +615,7 @@ export function SettingsPanel({
     const trackItemCount =
       videoClips.filter((clip) => clip.trackId === selectedTrack.id).length +
       audioClips.filter((clip) => clip.trackId === selectedTrack.id).length +
+      backgroundItems.filter((item) => item.trackId === selectedTrack.id).length +
       zoomRegions.filter((region) => region.trackId === selectedTrack.id).length +
       trimRegions.filter((region) => region.trackId === selectedTrack.id).length +
       annotationRegions.filter((annotation) => annotation.trackId === selectedTrack.id).length +
@@ -516,7 +623,7 @@ export function SettingsPanel({
       speedRegions.filter((region) => region.trackId === selectedTrack.id).length +
       (cursorTrack?.trackId === selectedTrack.id ? 1 : 0);
     const canAddItem = ['zoom', 'trim', 'effect', 'annotation', 'speed'].includes(selectedTrack.itemType);
-    const canMuteTrack = selectedTrack.type !== 'recording';
+    const canMuteTrack = selectedTrack.type !== 'recording' && selectedTrack.type !== 'background';
     const trackTypeLabel = selectedTrack.type === 'generic'
       ? 'Universal'
       : selectedTrack.type.charAt(0).toUpperCase() + selectedTrack.type.slice(1);
@@ -618,7 +725,7 @@ export function SettingsPanel({
           <Button
             onClick={() => onTrackDelete?.(selectedTrack.id)}
             variant="destructive"
-            disabled={selectedTrack.type === 'recording'}
+            disabled={selectedTrack.type === 'recording' || selectedTrack.type === 'background'}
             className="w-full gap-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/30 disabled:opacity-40"
           >
             <Trash2 className="w-4 h-4" />
@@ -647,6 +754,192 @@ export function SettingsPanel({
           </TabsTrigger>
         </TabsList>
         <TabsContent value="screen" className="mt-0 space-y-4">
+      {inspectedBackground && (
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-3 text-[11px] text-emerald-100/90 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-medium text-emerald-100">Editing Background Segment</div>
+              <div className="text-emerald-100/70">
+                {Math.max(0, inspectedBackground.startMs / 1000).toFixed(1)}s to {Math.max(0, inspectedBackground.endMs / 1000).toFixed(1)}s
+              </div>
+            </div>
+            {selectedBackground && onBackgroundDelete ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 gap-2 text-emerald-50 hover:bg-emerald-500/10 hover:text-white"
+                onClick={() => onBackgroundDelete(selectedBackground.id)}
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </Button>
+            ) : null}
+          </div>
+          <div>
+            Changes in this tab apply to the selected background segment. If no segment is selected, changes apply at the playhead.
+          </div>
+        </div>
+      )}
+      {inspectedBackground && onBackgroundChange ? (
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium text-slate-200">Background Segment</div>
+              <div className="text-[10px] text-slate-500">
+                {inspectedBackground.kind === 'video'
+                  ? 'Video'
+                  : inspectedBackground.kind === 'image'
+                    ? 'Image'
+                    : inspectedBackground.kind === 'gradient'
+                      ? 'Gradient'
+                      : inspectedBackground.kind === 'preset'
+                        ? 'Preset'
+                        : 'Color'}
+              </div>
+            </div>
+          {(inspectedBackground.kind === 'image' || inspectedBackground.kind === 'video') ? (
+            <div>
+              <div className="text-[11px] text-slate-400 mb-1">Fit</div>
+              <Select
+                value={inspectedBackground.fit ?? 'cover'}
+                onValueChange={(value) => onBackgroundChange(inspectedBackground.id, { fit: value as BackgroundFit })}
+              >
+                <SelectTrigger className="w-full bg-white/5 border-white/10 text-slate-200 h-9 text-xs">
+                  <SelectValue placeholder="Select fit" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1a1c] border-white/10 text-slate-200">
+                  <SelectItem value="cover">Fill canvas</SelectItem>
+                  <SelectItem value="contain">Fit inside</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-slate-400">
+              Fit applies to image and video background segments.
+            </div>
+          )}
+          {inspectedBackground.kind === 'preset' ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[11px] text-slate-400">Backdrop Color</div>
+                <div className="text-[10px] text-slate-500 font-mono uppercase">
+                  {selectedMagicBackdropColor}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                <input
+                  type="color"
+                  value={selectedMagicBackdropColor}
+                  onChange={(event) => onBackgroundChange(inspectedBackground.id, { backdropColor: event.target.value })}
+                  className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-0"
+                />
+                <div className="text-[11px] text-slate-400">
+                  Changes the canvas color behind Magic backgrounds like Retro Grid and Ripple.
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {inspectedBackground.kind === 'preset' ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[11px] text-slate-400">Accent Color</div>
+                <div className="text-[10px] text-slate-500 font-mono uppercase">
+                  {selectedMagicAccentColor}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                <input
+                  type="color"
+                  value={selectedMagicAccentColor}
+                  onChange={(event) => onBackgroundChange(inspectedBackground.id, { accentColor: event.target.value })}
+                  className="h-9 w-12 cursor-pointer rounded border border-white/10 bg-transparent p-0"
+                />
+                <div className="text-[11px] text-slate-400">
+                  Changes the line and ripple color for Magic backgrounds.
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {inspectedIsRetroGrid ? (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] text-slate-400">Grid Angle</div>
+                  <div className="text-[10px] text-slate-500 font-mono">{Math.round(selectedRetroGridAngle)}deg</div>
+                </div>
+                <Slider
+                  value={[selectedRetroGridAngle]}
+                  onValueChange={(values) => onBackgroundChange(inspectedBackground.id, { retroGridAngle: values[0] })}
+                  min={25}
+                  max={85}
+                  step={1}
+                  className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] text-slate-400">Grid Density</div>
+                  <div className="text-[10px] text-slate-500 font-mono">{selectedRetroGridDensity.toFixed(1)}x</div>
+                </div>
+                <Slider
+                  value={[selectedRetroGridDensity]}
+                  onValueChange={(values) => onBackgroundChange(inspectedBackground.id, { retroGridDensity: values[0] })}
+                  min={0.5}
+                  max={2.5}
+                  step={0.1}
+                  className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                />
+              </div>
+            </>
+          ) : null}
+          {inspectedIsRipple ? (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] text-slate-400">Ripple Speed</div>
+                  <div className="text-[10px] text-slate-500 font-mono">{selectedRippleSpeed.toFixed(2)}x</div>
+                </div>
+                <Slider
+                  value={[selectedRippleSpeed]}
+                  onValueChange={(values) => onBackgroundChange(inspectedBackground.id, { rippleSpeed: values[0] })}
+                  min={0.25}
+                  max={3}
+                  step={0.05}
+                  className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] text-slate-400">Ripple Count</div>
+                  <div className="text-[10px] text-slate-500 font-mono">{Math.round(selectedRippleCount)}</div>
+                </div>
+                <Slider
+                  value={[selectedRippleCount]}
+                  onValueChange={(values) => onBackgroundChange(inspectedBackground.id, { rippleCount: Math.round(values[0]) })}
+                  min={3}
+                  max={16}
+                  step={1}
+                  className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                />
+              </div>
+            </>
+          ) : null}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[11px] text-slate-400">Blur</div>
+              <div className="text-[10px] text-slate-500 font-mono">{Math.round(inspectedBackground.blurAmount ?? 0)}px</div>
+            </div>
+            <Slider
+              value={[inspectedBackground.blurAmount ?? 0]}
+              onValueChange={(values) => onBackgroundChange(inspectedBackground.id, { blurAmount: values[0] })}
+              min={0}
+              max={24}
+              step={1}
+              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+            />
+          </div>
+        </div>
+      ) : null}
       {cursorEnabled && cursorTrack && onCursorStyleChange && (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
@@ -1032,7 +1325,7 @@ export function SettingsPanel({
       </div>
 
       <div className="mb-6">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3">
           {/* Motion Blur Switch */}
           <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
             <div className="text-xs font-medium text-slate-200">Motion Blur</div>
@@ -1042,12 +1335,24 @@ export function SettingsPanel({
               className="data-[state=checked]:bg-[#34B27B]"
             />
           </div>
-          {/* Blur Background Switch */}
+          {backgroundItems.length === 0 ? (
+            <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+              <div className="text-xs font-medium text-slate-200">Blur</div>
+              <Switch
+                checked={showBlur}
+                onCheckedChange={onBlurChange}
+                className="data-[state=checked]:bg-[#34B27B]"
+              />
+            </div>
+          ) : null}
           <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-            <div className="text-xs font-medium text-slate-200">Blur</div>
+            <div>
+              <div className="text-xs font-medium text-slate-200">Safe Frame</div>
+              <div className="text-[11px] text-slate-500">Preview-only frame guides for staging off-canvas animation.</div>
+            </div>
             <Switch
-              checked={showBlur}
-              onCheckedChange={onBlurChange}
+              checked={showSafeFrameOverlay}
+              onCheckedChange={onShowSafeFrameOverlayChange}
               className="data-[state=checked]:bg-[#34B27B]"
             />
           </div>
@@ -1223,10 +1528,11 @@ export function SettingsPanel({
       )}
 
       <Tabs defaultValue="image" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-3 h-auto rounded-xl">
+        <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-4 h-auto rounded-xl">
           <TabsTrigger value="image" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Image</TabsTrigger>
           <TabsTrigger value="color" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Color</TabsTrigger>
           <TabsTrigger value="gradient" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Gradient</TabsTrigger>
+          <TabsTrigger value="magic" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Magic</TabsTrigger>
         </TabsList>
         
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2">
@@ -1344,6 +1650,65 @@ export function SettingsPanel({
               ))}
             </div>
           </TabsContent>
+
+          <TabsContent value="magic" className="mt-0 px-2">
+            <div className="grid gap-3">
+              <button
+                type="button"
+                className={cn(
+                  "relative h-28 overflow-hidden rounded-xl border-2 text-left transition-all",
+                  selected === MAGICUI_RETRO_GRID_VALUE
+                    ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 shadow-lg shadow-[#34B27B]/10"
+                    : "border-white/10 hover:border-[#34B27B]/40 bg-white/5"
+                )}
+                onClick={() => onWallpaperChange(MAGICUI_RETRO_GRID_VALUE)}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{ backgroundColor: selectedMagicBackdropColor }}
+                />
+                <RetroGrid
+                  className="opacity-80"
+                  angle={selectedRetroGridAngle}
+                  cellSize={Math.max(18, getRetroGridCellSize(selectedRetroGridDensity) - 4)}
+                  opacity={0.7}
+                  lightLineColor={selectedMagicAccentColor}
+                  darkLineColor={selectedMagicAccentColor}
+                />
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent px-3 py-2">
+                  <div className="text-xs font-medium text-slate-100">Retro Grid</div>
+                  <div className="text-[10px] text-slate-400">MagicUI preset background</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "relative h-28 overflow-hidden rounded-xl border-2 text-left transition-all",
+                  selected === MAGICUI_RIPPLE_VALUE
+                    ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 shadow-lg shadow-[#34B27B]/10"
+                    : "border-white/10 hover:border-[#34B27B]/40 bg-white/5"
+                )}
+                onClick={() => onWallpaperChange(MAGICUI_RIPPLE_VALUE)}
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{ backgroundColor: selectedMagicBackdropColor }}
+                />
+                <Ripple
+                  className="opacity-80 [mask-image:none]"
+                  mainCircleSize={120}
+                  mainCircleOpacity={0.22}
+                  numCircles={selectedRippleCount}
+                  animationDurationSeconds={getRippleAnimationDurationSeconds(selectedRippleSpeed)}
+                  style={{ color: selectedMagicAccentColor }}
+                />
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent px-3 py-2">
+                  <div className="text-xs font-medium text-slate-100">Ripple</div>
+                  <div className="text-[10px] text-slate-400">MagicUI preset background</div>
+                </div>
+              </button>
+            </div>
+          </TabsContent>
         </div>
       </Tabs>
 
@@ -1444,6 +1809,15 @@ export function SettingsPanel({
                         </Button>
                         <Button
                           type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-emerald-200 hover:text-white hover:bg-emerald-500/10"
+                          onClick={() => onBackgroundAssetAdd?.(asset.id)}
+                        >
+                          Background
+                        </Button>
+                        <Button
+                          type="button"
                           size="icon"
                           variant="ghost"
                           className="text-slate-400 hover:text-red-400 hover:bg-red-500/10"
@@ -1524,7 +1898,7 @@ export function SettingsPanel({
             <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
               {selectedClipIsRecording && (
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
-                  Recording layout is edited here now. Crop, roundness, and size keyframes still live in the Screen tab.
+                  Recording transform is edited here now. Crop and roundness still live in the Screen tab.
                 </div>
               )}
               {selectedClipPlacement && (
@@ -1537,8 +1911,8 @@ export function SettingsPanel({
                       <Slider
                         value={[selectedClipPlacement.x]}
                         onValueChange={(values) => updateSelectedClipPlacement({ x: values[0] })}
-                        min={selectedClipIsRecording ? -50 : 0}
-                        max={100}
+                        min={CLIP_TRANSFORM_POSITION_RANGE.min}
+                        max={CLIP_TRANSFORM_POSITION_RANGE.max}
                         step={1}
                         className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
@@ -1548,8 +1922,8 @@ export function SettingsPanel({
                       <Slider
                         value={[selectedClipPlacement.y]}
                         onValueChange={(values) => updateSelectedClipPlacement({ y: values[0] })}
-                        min={selectedClipIsRecording ? -50 : 0}
-                        max={100}
+                        min={CLIP_TRANSFORM_POSITION_RANGE.min}
+                        max={CLIP_TRANSFORM_POSITION_RANGE.max}
                         step={1}
                         className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
@@ -1559,8 +1933,8 @@ export function SettingsPanel({
                       <Slider
                         value={[selectedClipPlacement.width]}
                         onValueChange={(values) => updateSelectedClipPlacement({ width: values[0] })}
-                        min={5}
-                        max={100}
+                        min={CLIP_TRANSFORM_SIZE_RANGE.min}
+                        max={CLIP_TRANSFORM_SIZE_RANGE.max}
                         step={1}
                         className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
@@ -1570,14 +1944,154 @@ export function SettingsPanel({
                       <Slider
                         value={[selectedClipPlacement.height]}
                         onValueChange={(values) => updateSelectedClipPlacement({ height: values[0] })}
-                        min={5}
-                        max={100}
+                        min={CLIP_TRANSFORM_SIZE_RANGE.min}
+                        max={CLIP_TRANSFORM_SIZE_RANGE.max}
                         step={1}
                         className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
                       />
                     </div>
                   </div>
                 </div>
+                {selectedClipTransformState && (
+                  <div className="pt-1">
+                    <div className="text-[11px] text-slate-400 mb-2">Transform</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <div className="text-[10px] text-slate-500 mb-1">Rotation: {Math.round(selectedClipTransformState.rotationDeg)}°</div>
+                        <Slider
+                          value={[selectedClipTransformState.rotationDeg]}
+                          onValueChange={(values) => updateSelectedClipTransform({ rotationDeg: values[0] })}
+                          min={-180}
+                          max={180}
+                          step={1}
+                          className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                        />
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-slate-500 mb-1">Scale: {Math.round(selectedClipTransformState.scale * 100)}%</div>
+                        <Slider
+                          value={[selectedClipTransformState.scale * 100]}
+                          onValueChange={(values) => updateSelectedClipTransform({ scale: values[0] / 100 })}
+                          min={10}
+                          max={300}
+                          step={1}
+                          className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                        />
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-slate-500 mb-1">Opacity: {Math.round(selectedClipTransformState.opacity * 100)}%</div>
+                        <Slider
+                          value={[selectedClipTransformState.opacity * 100]}
+                          onValueChange={(values) => updateSelectedClipTransform({ opacity: values[0] / 100 })}
+                          min={0}
+                          max={100}
+                          step={1}
+                          className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[11px] text-slate-300">Transform Keyframes</div>
+                        <div className="text-[10px] text-slate-500">
+                          Add a keyframe at the playhead, then move, resize, rotate, scale, or fade the clip later to animate it.
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">
+                        {selectedClip.transformKeyframes?.length ?? 0} keyframes
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!canEditSelectedClipTransformKeyframes}
+                        className="gap-2 bg-white/5 text-slate-200 border-white/10 hover:bg-white/10 hover:border-white/20 hover:text-white disabled:opacity-40"
+                        onClick={() => onClipTransformKeyframeAddOrUpdate?.(selectedClip.id)}
+                      >
+                        <Star className="w-3 h-3" fill={selectedClipTransformKeyframe ? 'currentColor' : 'none'} />
+                        {selectedClipTransformKeyframe ? 'Update Keyframe' : 'Add Keyframe'}
+                      </Button>
+                      {(selectedClip.transformKeyframes?.length ?? 0) > 0 && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-slate-400 hover:text-white hover:bg-white/10"
+                          onClick={() => {
+                            onClipTransformKeyframesClear?.(selectedClip.id);
+                            toast.info('Transform keyframes cleared');
+                          }}
+                        >
+                          Clear All
+                        </Button>
+                      )}
+                    </div>
+                    {!canEditSelectedClipTransformKeyframes && (
+                      <div className="text-[10px] text-slate-500">
+                        Move the playhead onto the clip to add or update transform keyframes.
+                      </div>
+                    )}
+                    {(selectedClip.transformKeyframes?.length ?? 0) > 0 && (
+                      <div className="space-y-1.5">
+                        {[...(selectedClip.transformKeyframes ?? [])]
+                          .sort((a, b) => a.timeMs - b.timeMs)
+                          .map((keyframe, index, keyframes) => {
+                            const isCurrent = Math.abs(keyframe.timeMs - currentTimeMs) <= 50;
+                            const hasNextSegment = index < keyframes.length - 1;
+                            return (
+                              <div
+                                key={keyframe.id}
+                                className={cn(
+                                  "rounded-lg border px-3 py-2 text-[11px]",
+                                  isCurrent
+                                    ? "border-[#34B27B]/30 bg-[#34B27B]/10 text-slate-100"
+                                    : "border-white/10 bg-white/5 text-slate-300"
+                                )}
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="font-mono">
+                                    {(keyframe.timeMs / 1000).toFixed(2)}s
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                                    onClick={() => onClipTransformKeyframeDelete?.(selectedClip.id, keyframe.id)}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                                <div className="mt-2">
+                                  {hasNextSegment ? (
+                                    <div className="space-y-1">
+                                      <div className="text-[10px] text-slate-500">To next: curve</div>
+                                      <BezierCurveEditor
+                                        value={keyframe.curveToNext ?? LINEAR_BEZIER}
+                                        onChange={(curve) => onClipTransformKeyframeCurveChange?.(
+                                          selectedClip.id,
+                                          keyframe.id,
+                                          curve,
+                                        )}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-slate-500">
+                                      Final keyframe
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
                 {selectedClipAsset?.kind === 'recording' && !selectedClipIsRecording && (
                   <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100/90">
                     This continued recording inherits roundness from the Screen tab.

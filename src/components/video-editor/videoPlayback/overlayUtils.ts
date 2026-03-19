@@ -4,6 +4,7 @@ import { clampFocusToStage } from "./focusUtils";
 interface OverlayUpdateParams {
   overlayEl: HTMLDivElement;
   indicatorEl: HTMLDivElement;
+  stageRect: { x: number; y: number; width: number; height: number };
   region: ZoomRegion | null;
   focusOverride?: ZoomFocus;
   videoSize: { width: number; height: number };
@@ -12,7 +13,7 @@ interface OverlayUpdateParams {
 }
 
 export function updateOverlayIndicator(params: OverlayUpdateParams) {
-  const { overlayEl, indicatorEl, region, focusOverride, videoSize, baseScale, isPlaying } = params;
+  const { overlayEl, indicatorEl, stageRect, region, focusOverride, videoSize, baseScale, isPlaying } = params;
 
   if (!region) {
     indicatorEl.style.display = 'none';
@@ -20,8 +21,8 @@ export function updateOverlayIndicator(params: OverlayUpdateParams) {
     return;
   }
 
-  const stageWidth = overlayEl.clientWidth;
-  const stageHeight = overlayEl.clientHeight;
+  const stageWidth = stageRect.width;
+  const stageHeight = stageRect.height;
   
   if (!stageWidth || !stageHeight) {
     indicatorEl.style.display = 'none';
@@ -60,7 +61,7 @@ export function updateOverlayIndicator(params: OverlayUpdateParams) {
   indicatorEl.style.display = 'block';
   indicatorEl.style.width = `${indicatorWidth}px`;
   indicatorEl.style.height = `${indicatorHeight}px`;
-  indicatorEl.style.left = `${adjustedLeft}px`;
-  indicatorEl.style.top = `${adjustedTop}px`;
+  indicatorEl.style.left = `${stageRect.x + adjustedLeft}px`;
+  indicatorEl.style.top = `${stageRect.y + adjustedTop}px`;
   overlayEl.style.pointerEvents = isPlaying ? 'none' : 'auto';
 }
