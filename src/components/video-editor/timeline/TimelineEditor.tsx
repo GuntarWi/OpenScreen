@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDndMonitor } from "@dnd-kit/core";
 import { useTimelineContext } from "dnd-timeline";
 import { Button } from "@/components/ui/button";
-import { Plus, Scissors, ZoomIn, ZoomOut, MessageSquare, ChevronDown, Check, Sparkles, Trash2, GripVertical, Volume2, VolumeX, Eye, EyeOff, Gauge, Clapperboard, AudioLines, MousePointer2, Layers3, ImageIcon, Diamond, Copy } from "lucide-react";
+import { Plus, Scissors, ZoomIn, ZoomOut, MessageSquare, ChevronDown, Check, Sparkles, Trash2, GripVertical, Volume2, VolumeX, Eye, EyeOff, Gauge, Clapperboard, AudioLines, MousePointer2, Layers3, ImageIcon, Diamond, Copy, Square } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import TimelineWrapper from "./TimelineWrapper";
@@ -10,7 +10,7 @@ import Row from "./Row";
 import Item from "./Item";
 import KeyframeMarkers from "./KeyframeMarkers";
 import type { Range, Span } from "dnd-timeline";
-import type { BackgroundItem, ZoomRegion, TrimRegion, AnnotationRegion, CursorTrack, EffectRegion, CursorSmoothing, VideoAsset, VideoClip, AudioClip, TimelineTrack, TimelineTrackItemType, TimelineTrackTemplate, SpeedRegion } from "../types";
+import type { BackgroundItem, ZoomRegion, TrimRegion, AnnotationRegion, CursorTrack, EffectRegion, CursorSmoothing, VideoAsset, VideoClip, AudioClip, TimelineTrack, TimelineTrackItemType, TimelineTrackTemplate, SpeedRegion, MaskItem } from "../types";
 import { RECORDING_ASSET_ID } from "../types";
 import { BACKGROUND_TRACK_ID, getBackgroundItemLabel } from "../backgroundUtils";
 import { Switch } from "@/components/ui/switch";
@@ -23,12 +23,14 @@ import {
 import { type AspectRatio, getAspectRatioLabel, RESOLUTION_PRESETS } from "@/utils/aspectRatioUtils";
 import { formatShortcut } from "@/utils/platformUtils";
 import { findClipTransformKeyframeAtTime } from "@/utils/clipTransformKeyframes";
+import { findMaskPathKeyframeAtTime, getMaskPaths } from "@/utils/maskPathKeyframes";
 import { TIMELINE_SIDEBAR_WIDTH } from "./constants";
 
 const CURSOR_ITEM_ID = "cursor-track";
 
 const DRAG_GHOST_COLOR: Record<TimelineRenderItem['variant'], string> = {
   background: '#22c55e',
+  mask: '#14b8a6',
   clip: '#7c3aed',
   audio: '#0ea5e9',
   zoom: '#21916A',
@@ -64,6 +66,14 @@ interface TimelineEditorProps {
   onBackgroundTrackChange?: (id: string, trackId: string) => void;
   selectedBackgroundId?: string | null;
   onSelectBackground?: (id: string | null) => void;
+  maskItems?: MaskItem[];
+  onMaskSpanChange?: (id: string, span: Span) => void;
+  onMaskChange?: (id: string, patch: Partial<MaskItem>) => void;
+  onMaskDelete?: (id: string) => void;
+  onMaskTrackChange?: (id: string, trackId: string) => void;
+  selectedMaskId?: string | null;
+  onSelectMask?: (id: string | null) => void;
+  onMaskPathKeyframeAddOrUpdate?: (id: string) => void;
   videoClips?: VideoClip[];
   audioClips?: AudioClip[];
   onClipSpanChange?: (id: string, span: Span) => void;
@@ -148,11 +158,15 @@ interface TimelineKeyframeMarker {
   id: string;
   time: number;
   rawId?: string;
-  kind: 'clipTransform' | 'padding';
+  kind: 'clipTransform' | 'maskPath' | 'padding';
   color?: string;
   title?: string;
   clipId?: string;
+  maskId?: string;
+  pathId?: string;
 }
+
+type KeyframeSelectionMode = "replace" | "toggle";
 
 interface TimelineRenderItem {
   id: string;
@@ -160,7 +174,7 @@ interface TimelineRenderItem {
   span: Span;
   label: string;
   zoomDepth?: number;
-  variant: 'background' | 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'audio' | 'speed';
+  variant: 'background' | 'mask' | 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'audio' | 'speed';
   annotationType?: AnnotationRegion['type'];
   speedValue?: number;
   keyframes?: TimelineKeyframeMarker[];
@@ -495,6 +509,7 @@ function Timeline({
   currentTimeMs,
   onSeek,
   onSelectBackground,
+  onSelectMask,
   onSelectZoom,
   onSelectTrim,
   onSelectClip,
@@ -512,6 +527,7 @@ function Timeline({
   onTrackDelete,
   onTrackAutoTypeChange,
   selectedBackgroundId,
+  selectedMaskId,
   selectedClipId,
   selectedAudioClipId,
   selectedZoomId,
@@ -523,6 +539,8 @@ function Timeline({
   onSelectSpeed,
   selectedKeyframeIds,
   onSelectKeyframes,
+  onMaskChange,
+  onKeyframePointerDown,
 }: {
   items: TimelineRenderItem[];
   tracks: TimelineTrack[];
@@ -534,6 +552,7 @@ function Timeline({
   currentTimeMs: number;
   onSeek?: (time: number) => void;
   onSelectBackground?: (id: string | null) => void;
+  onSelectMask?: (id: string | null) => void;
   onSelectZoom?: (id: string | null) => void;
   onSelectTrim?: (id: string | null) => void;
   onSelectClip?: (id: string | null) => void;
@@ -551,6 +570,7 @@ function Timeline({
   onTrackDelete?: (trackId: string) => void;
   onTrackAutoTypeChange?: (trackId: string, itemId: string, itemType: TimelineTrackItemType) => void;
   selectedBackgroundId?: string | null;
+  selectedMaskId?: string | null;
   selectedClipId?: string | null;
   selectedAudioClipId?: string | null;
   selectedZoomId: string | null;
@@ -562,6 +582,12 @@ function Timeline({
   onSelectSpeed?: (id: string | null) => void;
   selectedKeyframeIds?: string[];
   onSelectKeyframes?: (ids: string[]) => void;
+  onMaskChange?: (id: string, patch: Partial<MaskItem>) => void;
+  onKeyframePointerDown?: (
+    event: React.PointerEvent,
+    keyframe: TimelineKeyframeMarker,
+    mode: KeyframeSelectionMode,
+  ) => void;
 }) {
   const { setTimelineRef, style, sidebarWidth, range, pixelsToValue, valueToPixels } = useTimelineContext();
   const effectiveSidebarWidth = sidebarWidth || TIMELINE_SIDEBAR_FALLBACK_WIDTH;
@@ -583,6 +609,7 @@ function Timeline({
     onSelectClip?.(null);
     onSelectAudioClip?.(null);
     onSelectBackground?.(null);
+    onSelectMask?.(null);
     onSelectZoom?.(null);
     onSelectTrim?.(null);
     onSelectAnnotation?.(null);
@@ -600,7 +627,7 @@ function Timeline({
     const timeInSeconds = absoluteMs / 1000;
     
     onSeek(timeInSeconds);
-  }, [onSeek, onSelectClip, onSelectAudioClip, onSelectBackground, onSelectZoom, onSelectTrim, onSelectAnnotation, onSelectEffect, onSelectCursor, onSelectKeyframes, seekDurationMs, effectiveSidebarWidth, range.start, pixelsToValue]);
+  }, [onSeek, onSelectClip, onSelectAudioClip, onSelectBackground, onSelectMask, onSelectZoom, onSelectTrim, onSelectAnnotation, onSelectEffect, onSelectCursor, onSelectKeyframes, seekDurationMs, effectiveSidebarWidth, range.start, pixelsToValue]);
 
   const handleMediaDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (draggingTrackId) {
@@ -788,6 +815,8 @@ function Timeline({
     switch (track.type) {
       case 'background':
         return <ImageIcon className="h-3.5 w-3.5" />;
+      case 'mask':
+        return <Square className="h-3.5 w-3.5" />;
       case 'recording':
       case 'video':
         return <Clapperboard className="h-3.5 w-3.5" />;
@@ -877,7 +906,7 @@ function Timeline({
       >
         <Trash2 className="h-3 w-3" />
       </button>
-      {track.type !== 'recording' && track.type !== 'background' ? (
+      {track.type !== 'recording' && track.type !== 'background' && track.type !== 'mask' ? (
         <button
           type="button"
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-white/5 text-slate-400 transition hover:bg-white/10 hover:text-slate-200"
@@ -964,6 +993,7 @@ function Timeline({
                   trackHeight={track.collapsed ? 36 : track.height}
                   isSelected={
                     (item.variant === 'background' && item.id === selectedBackgroundId) ||
+                    (item.variant === 'mask' && item.id === selectedMaskId) ||
                     (item.variant === 'clip' && item.id === selectedClipId) ||
                     (item.variant === 'audio' && item.id === selectedAudioClipId) ||
                     (item.variant === 'zoom' && item.id === selectedZoomId) ||
@@ -977,6 +1007,9 @@ function Timeline({
                     switch (item.variant) {
                       case 'background':
                         onSelectBackground?.(item.id);
+                        break;
+                      case 'mask':
+                        onSelectMask?.(item.id);
                         break;
                       case 'clip':
                         onSelectClip?.(item.id);
@@ -1015,9 +1048,18 @@ function Timeline({
                     time: keyframe.time,
                     isSelected: (selectedKeyframeIds ?? []).includes(keyframe.id),
                     isCurrent: Math.abs(keyframe.time - currentTimeMs) <= 50,
+                    color: keyframe.color,
+                    pathId: keyframe.pathId,
                   }))}
-                  onKeyframeSelect={(keyframeId, time, mode) => {
-                    onSelectClip?.(item.id);
+                  onKeyframeSelect={(keyframeId, time, mode, pathId) => {
+                    if (item.variant === 'mask') {
+                      onSelectMask?.(item.id);
+                      if (pathId) {
+                        onMaskChange?.(item.id, { activePathId: pathId });
+                      }
+                    } else {
+                      onSelectClip?.(item.id);
+                    }
                     if (mode === "toggle") {
                       const nextSelection = (selectedKeyframeIds ?? []).includes(keyframeId)
                         ? (selectedKeyframeIds ?? []).filter((id) => id !== keyframeId)
@@ -1027,6 +1069,14 @@ function Timeline({
                       onSelectKeyframes?.([keyframeId]);
                     }
                     onSeek?.(time / 1000);
+                  }}
+                  onKeyframePointerDown={(event, keyframe, mode) => {
+                    onKeyframePointerDown?.(event, {
+                      id: keyframe.id,
+                      time: keyframe.time,
+                      kind: item.variant === 'mask' ? 'maskPath' : 'clipTransform',
+                      ...(item.variant === 'mask' ? { maskId: item.id, pathId: keyframe.pathId } : { clipId: item.id }),
+                    }, mode);
                   }}
                 >
                   {item.label}
@@ -1059,6 +1109,14 @@ export default function TimelineEditor({
   onBackgroundTrackChange,
   selectedBackgroundId,
   onSelectBackground,
+  maskItems = [],
+  onMaskSpanChange,
+  onMaskChange,
+  onMaskDelete,
+  onMaskTrackChange,
+  selectedMaskId,
+  onSelectMask,
+  onMaskPathKeyframeAddOrUpdate,
   videoClips = [],
   audioClips = [],
   onClipSpanChange,
@@ -1132,6 +1190,10 @@ export default function TimelineEditor({
     () => backgroundItems.reduce((max, item) => Math.max(max, item.endMs), 0),
     [backgroundItems],
   );
+  const maskMaxEndMs = useMemo(
+    () => maskItems.reduce((max, item) => Math.max(max, item.endMs), 0),
+    [maskItems],
+  );
   const clipMaxEndMs = useMemo(
     () => videoClips.reduce((max, clip) => Math.max(max, clip.endMs), 0),
     [videoClips],
@@ -1141,8 +1203,8 @@ export default function TimelineEditor({
     [audioClips],
   );
   const timelineDurationMs = useMemo(
-    () => Math.max(videoDurationMs, backgroundMaxEndMs, clipMaxEndMs, audioMaxEndMs),
-    [videoDurationMs, backgroundMaxEndMs, clipMaxEndMs, audioMaxEndMs],
+    () => Math.max(videoDurationMs, backgroundMaxEndMs, maskMaxEndMs, clipMaxEndMs, audioMaxEndMs),
+    [videoDurationMs, backgroundMaxEndMs, maskMaxEndMs, clipMaxEndMs, audioMaxEndMs],
   );
   const currentTimeMs = useMemo(() => Math.round(currentTime * 1000), [currentTime]);
   const timelineScale = useMemo(
@@ -1168,7 +1230,7 @@ export default function TimelineEditor({
 
   const [range, setRange] = useState<Range>(() => createInitialRange(timelineDurationMs, getTimelineFitEndBufferMs(timelineDurationMs)));
   const [selectedKeyframeIds, setSelectedKeyframeIds] = useState<string[]>([]);
-  const pendingKeyframeSelectionTimeRef = useRef<number | null>(null);
+  const pendingKeyframeSelectionRef = useRef<null | { kind: 'clip' | 'mask'; timeMs: number; ownerId: string }>(null);
   const timelineViewportRef = useRef<HTMLDivElement | null>(null);
   const timelineSelectionAreaRef = useRef<HTMLDivElement | null>(null);
   const suppressClearKeyframeClickRef = useRef(false);
@@ -1207,6 +1269,10 @@ export default function TimelineEditor({
     () => selectedClipId ? videoClips.find((clip) => clip.id === selectedClipId) ?? null : null,
     [selectedClipId, videoClips],
   );
+  const selectedMask = useMemo(
+    () => selectedMaskId ? maskItems.find((item) => item.id === selectedMaskId) ?? null : null,
+    [maskItems, selectedMaskId],
+  );
   const selectedTransformClip = useMemo(
     () => selectedClip ?? null,
     [selectedClip],
@@ -1222,6 +1288,18 @@ export default function TimelineEditor({
       : null,
     [currentTimeMs, selectedTransformClip],
   );
+  const canKeyframeSelectedMask = Boolean(
+    selectedMask &&
+    (selectedMask.matteMode ?? 'shape') === 'shape' &&
+    currentTimeMs >= selectedMask.startMs &&
+    currentTimeMs <= selectedMask.endMs,
+  );
+  const selectedMaskKeyframeAtPlayhead = useMemo(
+    () => selectedMask
+      ? findMaskPathKeyframeAtTime(selectedMask.pathKeyframes, currentTimeMs)
+      : null,
+    [currentTimeMs, selectedMask],
+  );
   const timelineKeyframes = useMemo(() => {
     const clipMarkers = clipTrackOrder
       .flatMap((clip) => (clip.transformKeyframes ?? []).map((keyframe) => ({
@@ -1234,6 +1312,20 @@ export default function TimelineEditor({
         clipId: clip.id,
       })));
 
+    const maskMarkers = maskItems
+      .flatMap((mask) => getMaskPaths(mask).flatMap((path, index) => (
+        (path.pathKeyframes ?? []).map((keyframe) => ({
+          id: `mask-path:${keyframe.id}`,
+          time: keyframe.timeMs,
+          rawId: keyframe.id,
+          kind: 'maskPath' as const,
+          color: '#14b8a6',
+          title: `Mask path ${index + 1} keyframe @ ${(keyframe.timeMs / 1000).toFixed(2)}s`,
+          maskId: mask.id,
+          pathId: path.id,
+        }))
+      )));
+
     const paddingMarkers = paddingKeyframes.map((keyframe) => ({
       id: `padding:${keyframe.id}`,
       time: keyframe.timeMs,
@@ -1243,12 +1335,242 @@ export default function TimelineEditor({
       title: `Screen keyframe @ ${(keyframe.timeMs / 1000).toFixed(2)}s`,
     }));
 
-    return [...clipMarkers, ...paddingMarkers].sort((a, b) => a.time - b.time);
-  }, [clipTrackOrder, paddingKeyframes]);
+    return [...clipMarkers, ...maskMarkers, ...paddingMarkers].sort((a, b) => a.time - b.time);
+  }, [clipTrackOrder, maskItems, paddingKeyframes]);
+  const timelineKeyframeMap = useMemo(
+    () => new Map(timelineKeyframes.map((keyframe) => [keyframe.id, keyframe])),
+    [timelineKeyframes],
+  );
   const selectedTimelineKeyframes = useMemo(
     () => timelineKeyframes.filter((keyframe) => selectedKeyframeIds.includes(keyframe.id)),
     [selectedKeyframeIds, timelineKeyframes],
   );
+  const selectTimelineKeyframe = useCallback((keyframe: TimelineKeyframeMarker, mode: KeyframeSelectionMode) => {
+    if (keyframe.kind === 'clipTransform' && keyframe.clipId) {
+      onSelectClip?.(keyframe.clipId);
+    } else if (keyframe.kind === 'maskPath' && keyframe.maskId) {
+      onSelectMask?.(keyframe.maskId);
+      if (keyframe.pathId) {
+        onMaskChange?.(keyframe.maskId, { activePathId: keyframe.pathId });
+      }
+    }
+
+    setSelectedKeyframeIds((prev) => {
+      if (mode === "toggle") {
+        return prev.includes(keyframe.id)
+          ? prev.filter((id) => id !== keyframe.id)
+          : [...prev, keyframe.id];
+      }
+      return [keyframe.id];
+    });
+    onSeek?.(keyframe.time / 1000);
+  }, [onMaskChange, onSeek, onSelectClip, onSelectMask]);
+  const beginKeyframePointerDrag = useCallback((event: React.PointerEvent, keyframe: TimelineKeyframeMarker, mode: KeyframeSelectionMode) => {
+    if (event.button !== 0) return;
+
+    const resolvedKeyframe = timelineKeyframeMap.get(keyframe.id) ?? keyframe;
+    const dragKeyframes = (
+      mode === "replace" &&
+      selectedKeyframeIds.includes(resolvedKeyframe.id) &&
+      selectedTimelineKeyframes.length > 1
+    )
+      ? selectedTimelineKeyframes
+      : [resolvedKeyframe];
+    const dragKeyframeIds = dragKeyframes.map((marker) => marker.id);
+
+    if (resolvedKeyframe.kind === 'clipTransform' && resolvedKeyframe.clipId) {
+      onSelectClip?.(resolvedKeyframe.clipId);
+    } else if (resolvedKeyframe.kind === 'maskPath' && resolvedKeyframe.maskId) {
+      onSelectMask?.(resolvedKeyframe.maskId);
+      if (resolvedKeyframe.pathId) {
+        onMaskChange?.(resolvedKeyframe.maskId, { activePathId: resolvedKeyframe.pathId });
+      }
+    }
+
+    const viewportWidth = Math.max(
+      1,
+      (timelineSelectionAreaRef.current?.clientWidth ?? timelineViewportWidth) - TIMELINE_SIDEBAR_FALLBACK_WIDTH,
+    );
+    const clipGroups = new Map<string, { clip: VideoClip; keyframeIds: Set<string>; baseTimes: Map<string, number> }>();
+    const maskGroups = new Map<string, { mask: MaskItem; pathId: string; keyframeIds: Set<string>; baseTimes: Map<string, number> }>();
+    const paddingBaseTimes = new Map<string, number>();
+    let lowerDelta = -Infinity;
+    let upperDelta = Infinity;
+
+    dragKeyframes.forEach((marker) => {
+      if (marker.kind === 'clipTransform' && marker.clipId && marker.rawId) {
+        const clip = videoClips.find((item) => item.id === marker.clipId);
+        if (!clip) return;
+        const group = clipGroups.get(marker.clipId) ?? {
+          clip,
+          keyframeIds: new Set<string>(),
+          baseTimes: new Map<string, number>(),
+        };
+        group.keyframeIds.add(marker.rawId);
+        group.baseTimes.set(marker.rawId, marker.time);
+        clipGroups.set(marker.clipId, group);
+        lowerDelta = Math.max(lowerDelta, clip.startMs - marker.time);
+        upperDelta = Math.min(upperDelta, clip.endMs - marker.time);
+        return;
+      }
+
+      if (marker.kind === 'maskPath' && marker.maskId && marker.rawId && marker.pathId) {
+        const mask = maskItems.find((item) => item.id === marker.maskId);
+        if (!mask) return;
+        const groupKey = `${marker.maskId}:${marker.pathId}`;
+        const group = maskGroups.get(groupKey) ?? {
+          mask,
+          pathId: marker.pathId,
+          keyframeIds: new Set<string>(),
+          baseTimes: new Map<string, number>(),
+        };
+        group.keyframeIds.add(marker.rawId);
+        group.baseTimes.set(marker.rawId, marker.time);
+        maskGroups.set(groupKey, group);
+        lowerDelta = Math.max(lowerDelta, mask.startMs - marker.time);
+        upperDelta = Math.min(upperDelta, mask.endMs - marker.time);
+        return;
+      }
+
+      if (marker.kind === 'padding' && marker.rawId) {
+        paddingBaseTimes.set(marker.rawId, marker.time);
+        lowerDelta = Math.max(lowerDelta, -marker.time);
+        upperDelta = Math.min(upperDelta, timelineDurationMs - marker.time);
+      }
+    });
+
+    let didDrag = false;
+    let lastAppliedDelta = 0;
+    const startClientX = event.clientX;
+    const pointerId = event.pointerId;
+
+    const applyDelta = (deltaMs: number) => {
+      clipGroups.forEach(({ clip, keyframeIds, baseTimes }, clipId) => {
+        onClipChange?.(clipId, {
+          transformKeyframes: (clip.transformKeyframes ?? [])
+            .map((item) => (
+              keyframeIds.has(item.id)
+                ? {
+                    ...item,
+                    timeMs: Math.max(
+                      clip.startMs,
+                      Math.min(clip.endMs, Math.round((baseTimes.get(item.id) ?? item.timeMs) + deltaMs)),
+                    ),
+                  }
+                : item
+            ))
+            .sort((a, b) => a.timeMs - b.timeMs),
+        });
+      });
+
+      maskGroups.forEach(({ mask, pathId, keyframeIds, baseTimes }) => {
+        onMaskChange?.(mask.id, {
+          activePathId: pathId,
+          paths: getMaskPaths(mask).map((path) => (
+            path.id === pathId
+              ? {
+                  ...path,
+                  pathKeyframes: (path.pathKeyframes ?? [])
+                    .map((item) => (
+                      keyframeIds.has(item.id)
+                        ? {
+                            ...item,
+                            timeMs: Math.max(
+                              mask.startMs,
+                              Math.min(mask.endMs, Math.round((baseTimes.get(item.id) ?? item.timeMs) + deltaMs)),
+                            ),
+                          }
+                        : item
+                    ))
+                    .sort((a, b) => a.timeMs - b.timeMs),
+                }
+              : path
+          )),
+        });
+      });
+
+      if (paddingBaseTimes.size && onPaddingKeyframesChange) {
+        onPaddingKeyframesChange(
+          paddingKeyframes
+            .map((item) => (
+              paddingBaseTimes.has(item.id)
+                ? {
+                    ...item,
+                    timeMs: Math.max(0, Math.min(timelineDurationMs, Math.round((paddingBaseTimes.get(item.id) ?? item.timeMs) + deltaMs))),
+                  }
+                : item
+            ))
+            .sort((a, b) => a.timeMs - b.timeMs),
+        );
+      }
+    };
+
+    const finishDrag = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      const distanceX = moveEvent.clientX - startClientX;
+      const rawDelta = Math.round((distanceX / viewportWidth) * Math.max(1, range.end - range.start));
+      const clampedDelta = Math.max(lowerDelta, Math.min(upperDelta, rawDelta));
+
+      if (!didDrag && Math.abs(distanceX) < 4) {
+        return;
+      }
+
+      didDrag = true;
+      suppressClearKeyframeClickRef.current = true;
+      setSelectedKeyframeIds(dragKeyframeIds);
+
+      if (clampedDelta === lastAppliedDelta) {
+        return;
+      }
+
+      lastAppliedDelta = clampedDelta;
+      applyDelta(clampedDelta);
+      onSeek?.(Math.max(0, resolvedKeyframe.time + clampedDelta) / 1000);
+    };
+
+    const handlePointerUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
+      finishDrag();
+      suppressClearKeyframeClickRef.current = true;
+
+      if (!didDrag) {
+        selectTimelineKeyframe(resolvedKeyframe, mode);
+        return;
+      }
+
+      setSelectedKeyframeIds(dragKeyframeIds);
+      const finalTimeMs = Math.max(0, resolvedKeyframe.time + lastAppliedDelta);
+      onSeek?.(finalTimeMs / 1000);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  }, [
+    onClipChange,
+    onMaskChange,
+    onPaddingKeyframesChange,
+    onSeek,
+    onSelectClip,
+    onSelectMask,
+    maskItems,
+    paddingKeyframes,
+    selectedKeyframeIds,
+    selectedTimelineKeyframes,
+    timelineDurationMs,
+    timelineKeyframeMap,
+    timelineViewportWidth,
+    videoClips,
+    range.end,
+    range.start,
+    selectTimelineKeyframe,
+  ]);
 
   const zoomByFactor = useCallback((factor: number) => {
     setRange((prev) => {
@@ -1359,7 +1681,7 @@ export default function TimelineEditor({
           .map((node) => node.dataset.keyframeId)
           .filter((id): id is string => Boolean(id));
         suppressClearKeyframeClickRef.current = true;
-        setSelectedKeyframeIds(nextSelection);
+        setSelectedKeyframeIds([...new Set(nextSelection)]);
         return null;
       });
     };
@@ -1374,31 +1696,63 @@ export default function TimelineEditor({
   }, [boxSelection]);
 
   useEffect(() => {
-    const pendingTime = pendingKeyframeSelectionTimeRef.current;
-    if (!selectedTransformClip || pendingTime === null) {
+    const pending = pendingKeyframeSelectionRef.current;
+    if (!pending) {
       return;
     }
 
-    const keyframe = findClipTransformKeyframeAtTime(selectedTransformClip.transformKeyframes, pendingTime);
+    if (pending.kind === 'clip') {
+      const clip = videoClips.find((item) => item.id === pending.ownerId);
+      if (!clip) {
+        return;
+      }
+      const keyframe = findClipTransformKeyframeAtTime(clip.transformKeyframes, pending.timeMs);
+      if (!keyframe) {
+        return;
+      }
+      setSelectedKeyframeIds([`clip-transform:${keyframe.id}`]);
+      pendingKeyframeSelectionRef.current = null;
+      return;
+    }
+
+    const mask = maskItems.find((item) => item.id === pending.ownerId);
+    if (!mask) {
+      return;
+    }
+    const keyframe = findMaskPathKeyframeAtTime(mask.pathKeyframes, pending.timeMs);
     if (!keyframe) {
       return;
     }
-
-    setSelectedKeyframeIds([`clip-transform:${keyframe.id}`]);
-    pendingKeyframeSelectionTimeRef.current = null;
-  }, [selectedTransformClip]);
+    setSelectedKeyframeIds([`mask-path:${keyframe.id}`]);
+    pendingKeyframeSelectionRef.current = null;
+  }, [maskItems, videoClips]);
 
   const addKeyframe = useCallback(() => {
-    if (!selectedTransformClip || !onClipTransformKeyframeAddOrUpdate || !canKeyframeSelectedClip) {
+    if (selectedTransformClip && onClipTransformKeyframeAddOrUpdate && canKeyframeSelectedClip) {
+      pendingKeyframeSelectionRef.current = {
+        kind: 'clip',
+        timeMs: currentTimeMs,
+        ownerId: selectedTransformClip.id,
+      };
+      onClipTransformKeyframeAddOrUpdate(selectedTransformClip.id);
       return;
     }
 
-    pendingKeyframeSelectionTimeRef.current = currentTimeMs;
-    onClipTransformKeyframeAddOrUpdate(selectedTransformClip.id);
+    if (selectedMask && onMaskPathKeyframeAddOrUpdate && canKeyframeSelectedMask) {
+      pendingKeyframeSelectionRef.current = {
+        kind: 'mask',
+        timeMs: currentTimeMs,
+        ownerId: selectedMask.id,
+      };
+      onMaskPathKeyframeAddOrUpdate(selectedMask.id);
+    }
   }, [
     canKeyframeSelectedClip,
+    canKeyframeSelectedMask,
     currentTimeMs,
+    onMaskPathKeyframeAddOrUpdate,
     onClipTransformKeyframeAddOrUpdate,
+    selectedMask,
     selectedTransformClip,
   ]);
 
@@ -1406,6 +1760,7 @@ export default function TimelineEditor({
     if (!selectedTimelineKeyframes.length) return;
 
     const clipGroups = new Map<string, string[]>();
+    const maskGroups = new Map<string, string[]>();
     const paddingIds: string[] = [];
 
     selectedTimelineKeyframes.forEach((keyframe) => {
@@ -1413,6 +1768,11 @@ export default function TimelineEditor({
         const list = clipGroups.get(keyframe.clipId) ?? [];
         list.push(keyframe.rawId ?? keyframe.id);
         clipGroups.set(keyframe.clipId, list);
+      } else if (keyframe.kind === 'maskPath' && keyframe.maskId && keyframe.pathId) {
+        const groupKey = `${keyframe.maskId}:${keyframe.pathId}`;
+        const list = maskGroups.get(groupKey) ?? [];
+        list.push(keyframe.rawId ?? keyframe.id);
+        maskGroups.set(groupKey, list);
       } else if (keyframe.kind === 'padding' && keyframe.rawId) {
         paddingIds.push(keyframe.rawId);
       }
@@ -1426,6 +1786,20 @@ export default function TimelineEditor({
       });
     });
 
+    maskGroups.forEach((keyframeIds, groupKey) => {
+      const [maskId, pathId] = groupKey.split(":");
+      const mask = maskItems.find((item) => item.id === maskId);
+      if (!mask || !onMaskChange) return;
+      onMaskChange(maskId, {
+        activePathId: pathId,
+        paths: getMaskPaths(mask).map((path) => (
+          path.id === pathId
+            ? { ...path, pathKeyframes: (path.pathKeyframes ?? []).filter((keyframe) => !keyframeIds.includes(keyframe.id)) }
+            : path
+        )),
+      });
+    });
+
     if (paddingIds.length && onPaddingKeyframesChange) {
       onPaddingKeyframesChange(paddingKeyframes.filter((keyframe) => !paddingIds.includes(keyframe.id)));
     } else if (paddingIds.length) {
@@ -1433,7 +1807,7 @@ export default function TimelineEditor({
     }
 
     setSelectedKeyframeIds([]);
-  }, [onClipChange, onPaddingKeyframesChange, paddingKeyframes, selectedTimelineKeyframes, videoClips]);
+  }, [maskItems, onClipChange, onMaskChange, onPaddingKeyframesChange, paddingKeyframes, selectedTimelineKeyframes, videoClips]);
 
   const duplicateSelectedKeyframes = useCallback(() => {
     if (!selectedTimelineKeyframes.length) return;
@@ -1441,6 +1815,7 @@ export default function TimelineEditor({
     const earliestTime = Math.min(...selectedTimelineKeyframes.map((keyframe) => keyframe.time));
     const nextSelectedIds: string[] = [];
     const clipGroups = new Map<string, string[]>();
+    const maskGroups = new Map<string, string[]>();
     const paddingIds: string[] = [];
 
     selectedTimelineKeyframes.forEach((keyframe) => {
@@ -1448,6 +1823,11 @@ export default function TimelineEditor({
         const list = clipGroups.get(keyframe.clipId) ?? [];
         list.push(keyframe.rawId ?? keyframe.id);
         clipGroups.set(keyframe.clipId, list);
+      } else if (keyframe.kind === 'maskPath' && keyframe.maskId && keyframe.pathId) {
+        const groupKey = `${keyframe.maskId}:${keyframe.pathId}`;
+        const list = maskGroups.get(groupKey) ?? [];
+        list.push(keyframe.rawId ?? keyframe.id);
+        maskGroups.set(groupKey, list);
       } else if (keyframe.kind === 'padding' && keyframe.rawId) {
         paddingIds.push(keyframe.rawId);
       }
@@ -1473,6 +1853,32 @@ export default function TimelineEditor({
       });
     });
 
+    maskGroups.forEach((keyframeIds, groupKey) => {
+      const [maskId, pathId] = groupKey.split(":");
+      const mask = maskItems.find((item) => item.id === maskId);
+      if (!mask || !onMaskChange) return;
+      const duplicates = getMaskPaths(mask)
+        .find((path) => path.id === pathId)?.pathKeyframes
+        ?.filter((keyframe) => keyframeIds.includes(keyframe.id))
+        .map((keyframe) => {
+          const newId = `mask-path-${Math.round(currentTimeMs)}-${Math.random().toString(36).slice(2, 8)}`;
+          nextSelectedIds.push(`mask-path:${newId}`);
+          return {
+            ...keyframe,
+            id: newId,
+            timeMs: Math.max(0, Math.round(currentTimeMs + (keyframe.timeMs - earliestTime))),
+          };
+        }) ?? [];
+      onMaskChange(maskId, {
+        activePathId: pathId,
+        paths: getMaskPaths(mask).map((path) => (
+          path.id === pathId
+            ? { ...path, pathKeyframes: [...(path.pathKeyframes ?? []), ...duplicates] }
+            : path
+        )),
+      });
+    });
+
     if (paddingIds.length && onPaddingKeyframesChange) {
       const duplicates = paddingKeyframes
         .filter((keyframe) => paddingIds.includes(keyframe.id))
@@ -1491,7 +1897,7 @@ export default function TimelineEditor({
     if (nextSelectedIds.length) {
       setSelectedKeyframeIds(nextSelectedIds);
     }
-  }, [currentTimeMs, onClipChange, onPaddingKeyframesChange, paddingKeyframes, selectedTimelineKeyframes, videoClips]);
+  }, [currentTimeMs, maskItems, onClipChange, onMaskChange, onPaddingKeyframesChange, paddingKeyframes, selectedTimelineKeyframes, videoClips]);
 
   // Delete selected zoom item
   const deleteSelectedZoom = useCallback(() => {
@@ -1518,6 +1924,12 @@ export default function TimelineEditor({
     onClipDelete(selectedClipId);
     onSelectClip(null);
   }, [selectedClipId, onClipDelete, onSelectClip]);
+
+  const deleteSelectedMask = useCallback(() => {
+    if (!selectedMaskId || !onMaskDelete || !onSelectMask) return;
+    onMaskDelete(selectedMaskId);
+    onSelectMask(null);
+  }, [onMaskDelete, onSelectMask, selectedMaskId]);
 
   const deleteSelectedAudioClip = useCallback(() => {
     if (!selectedAudioClipId || !onAudioClipDelete || !onSelectAudioClip) return;
@@ -1846,6 +2258,8 @@ export default function TimelineEditor({
           deleteSelectedKeyframe();
         } else if (selectedBackgroundId) {
           onBackgroundDelete?.(selectedBackgroundId);
+        } else if (selectedMaskId) {
+          deleteSelectedMask();
         } else if (selectedZoomId) {
           deleteSelectedZoom();
         } else if (selectedTrimId) {
@@ -1865,7 +2279,7 @@ export default function TimelineEditor({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [addKeyframe, handleAddZoom, handleAddTrim, handleUnifiedSplit, handleAddAnnotation, handleAddEffect, handleAddSpeed, deleteSelectedKeyframe, duplicateSelectedKeyframes, deleteSelectedZoom, deleteSelectedTrim, deleteSelectedClip, deleteSelectedAudioClip, deleteSelectedEffect, deleteSelectedAnnotation, deleteSelectedSpeed, selectedKeyframeId, selectedKeyframeIds.length, selectedBackgroundId, selectedZoomId, selectedTrimId, selectedClipId, selectedAudioClipId, selectedEffectId, selectedAnnotationId, selectedSpeedId, annotationRegions, currentTime, onBackgroundDelete, onSelectAnnotation, onSelectEffect]);
+  }, [addKeyframe, handleAddZoom, handleAddTrim, handleUnifiedSplit, handleAddAnnotation, handleAddEffect, handleAddSpeed, deleteSelectedKeyframe, duplicateSelectedKeyframes, deleteSelectedZoom, deleteSelectedTrim, deleteSelectedClip, deleteSelectedMask, deleteSelectedAudioClip, deleteSelectedEffect, deleteSelectedAnnotation, deleteSelectedSpeed, selectedKeyframeId, selectedKeyframeIds.length, selectedBackgroundId, selectedMaskId, selectedZoomId, selectedTrimId, selectedClipId, selectedAudioClipId, selectedEffectId, selectedAnnotationId, selectedSpeedId, annotationRegions, currentTime, onBackgroundDelete, onSelectAnnotation, onSelectEffect]);
 
   const clampedRange = useMemo<Range>(() => {
     if (timelineDurationMs === 0) {
@@ -1909,6 +2323,46 @@ export default function TimelineEditor({
       label: `${getBackgroundItemLabel(item, videoAssets, index)} · ${Math.max(0, (item.endMs - item.startMs) / 1000).toFixed(1)}s`,
       variant: 'background',
     }));
+
+    const masks: TimelineRenderItem[] = maskItems.map((item, index) => {
+      const clip = videoClips.find((candidate) => candidate.id === item.targetClipId);
+      const asset = clip ? videoAssets.find((candidate) => candidate.id === clip.assetId) : null;
+      const targetLabel = asset?.name || `Clip ${index + 1}`;
+      const maskPaths = getMaskPaths(item);
+      const shapeLabel = item.matteMode === 'track-above'
+        ? 'Matte Above'
+        : item.matteMode === 'track-below'
+          ? 'Matte Below'
+          : maskPaths.length > 1
+            ? `${maskPaths.length} Paths`
+            : item.shape === 'path'
+              ? 'Path'
+              : item.shape === 'ellipse'
+                ? 'Ellipse'
+                : 'Rect';
+      const durationSec = Math.max(0, (item.endMs - item.startMs) / 1000).toFixed(1);
+      return {
+        id: item.id,
+        rowId: item.trackId || 'track-mask-1',
+        span: { start: item.startMs, end: item.endMs },
+        label: `${shapeLabel} Mask · ${targetLabel} · ${durationSec}s`,
+        variant: 'mask',
+        keyframes: maskPaths
+          .flatMap((path, pathIndex) => (path.pathKeyframes ?? [])
+            .filter((keyframe) => keyframe.timeMs >= item.startMs && keyframe.timeMs <= item.endMs)
+            .map((keyframe) => ({
+              id: `mask-path:${keyframe.id}`,
+              rawId: keyframe.id,
+              time: keyframe.timeMs,
+              kind: 'maskPath' as const,
+              color: '#14b8a6',
+              title: `Mask path ${pathIndex + 1} keyframe @ ${(keyframe.timeMs / 1000).toFixed(2)}s`,
+              maskId: item.id,
+              pathId: path.id,
+            })))
+          .sort((a, b) => a.time - b.time),
+      };
+    });
 
     const clips: TimelineRenderItem[] = clipTrackOrder.map((clip, index) => {
       const asset = videoAssets.find((item) => item.id === clip.assetId);
@@ -2026,8 +2480,8 @@ export default function TimelineEditor({
       speedValue: region.speed,
     }));
 
-    return [...backgrounds, ...clips, ...audios, ...zooms, ...effects, ...trims, ...cursors, ...annotations, ...speeds];
-  }, [backgroundItems, clipTrackOrder, audioClips, videoAssets, zoomRegions, trimRegions, effectRegions, annotationRegions, speedRegions, cursorEnabled, cursorTrack, videoDurationMs, isRecordingClip]);
+    return [...backgrounds, ...masks, ...clips, ...audios, ...zooms, ...effects, ...trims, ...cursors, ...annotations, ...speeds];
+  }, [backgroundItems, maskItems, clipTrackOrder, audioClips, videoAssets, videoClips, zoomRegions, trimRegions, effectRegions, annotationRegions, speedRegions, cursorEnabled, cursorTrack, videoDurationMs, isRecordingClip]);
 
   useEffect(() => {
     const node = timelineViewportRef.current;
@@ -2135,12 +2589,15 @@ export default function TimelineEditor({
       return;
     }
     const backgroundItem = backgroundItems.find((item) => item.id === id);
+    const maskItem = maskItems.find((item) => item.id === id);
     const clip = videoClips.find((item) => item.id === id);
     if (backgroundItem) {
       const maxMs = scrollableTimelineDurationMs > 0 ? scrollableTimelineDurationMs : timelineDurationMs;
       onBackgroundSpanChange?.(id, clampSpanToRange(span, maxMs));
-    } else
-    if (clip) {
+    } else if (maskItem) {
+      const maxMs = scrollableTimelineDurationMs > 0 ? scrollableTimelineDurationMs : timelineDurationMs;
+      onMaskSpanChange?.(id, clampSpanToRange(span, maxMs));
+    } else if (clip) {
       const maxMs = scrollableTimelineDurationMs > 0 ? scrollableTimelineDurationMs : timelineDurationMs;
       onClipSpanChange?.(id, clampSpanToRange(span, maxMs));
     } else if (audioClips.some((item) => item.id === id)) {
@@ -2157,7 +2614,7 @@ export default function TimelineEditor({
     } else if (speedRegions.some(r => r.id === id)) {
       onSpeedSpanChange?.(id, clampSpanToRange(span, videoDurationMs));
     }
-  }, [backgroundItems, videoClips, audioClips, zoomRegions, trimRegions, effectRegions, annotationRegions, speedRegions, onBackgroundSpanChange, onClipSpanChange, onAudioClipSpanChange, onZoomSpanChange, onTrimSpanChange, onEffectSpanChange, onAnnotationSpanChange, onSpeedSpanChange, clampSpanToRange, videoDurationMs, timelineDurationMs, scrollableTimelineDurationMs]);
+  }, [backgroundItems, maskItems, videoClips, audioClips, zoomRegions, trimRegions, effectRegions, annotationRegions, speedRegions, onBackgroundSpanChange, onMaskSpanChange, onClipSpanChange, onAudioClipSpanChange, onZoomSpanChange, onTrimSpanChange, onEffectSpanChange, onAnnotationSpanChange, onSpeedSpanChange, clampSpanToRange, videoDurationMs, timelineDurationMs, scrollableTimelineDurationMs]);
 
   const handleItemDrop = useCallback((activeId: string, overId: string | null) => {
     if (!overId) return;
@@ -2166,6 +2623,7 @@ export default function TimelineEditor({
     if (activeItem && targetTrack) {
       const variantToItemType: Record<TimelineRenderItem['variant'], TimelineTrackItemType> = {
         background: 'background',
+        mask: 'mask',
         clip: 'videoClip',
         audio: 'audioClip',
         zoom: 'zoom',
@@ -2189,6 +2647,10 @@ export default function TimelineEditor({
         if (activeItem.variant !== 'background') {
           return;
         }
+      } else if (targetTrack.type === 'mask') {
+        if (activeItem.variant !== 'mask') {
+          return;
+        }
       } else if (activeIsRecordingClip) {
         return;
       }
@@ -2199,6 +2661,9 @@ export default function TimelineEditor({
       switch (activeItem.variant) {
         case 'background':
           onBackgroundTrackChange?.(activeItem.id, targetTrack.id);
+          return;
+        case 'mask':
+          onMaskTrackChange?.(activeItem.id, targetTrack.id);
           return;
         case 'clip':
           onClipTrackChange?.(activeItem.id, targetTrack.id);
@@ -2240,7 +2705,7 @@ export default function TimelineEditor({
     nextOrder.splice(fromIndex, 1);
     nextOrder.splice(toIndex, 0, activeId);
     onClipOrderChange(nextOrder);
-  }, [onClipOrderChange, videoClips, clipOrderIds, timelineItems, tracks, onBackgroundTrackChange, onClipTrackChange, onAudioClipTrackChange, onZoomTrackChange, onTrimTrackChange, onEffectTrackChange, onAnnotationTrackChange, onCursorTrackChange, onSpeedTrackChange, onTrackAutoTypeChange, isRecordingClip]);
+  }, [onClipOrderChange, videoClips, clipOrderIds, timelineItems, tracks, onBackgroundTrackChange, onMaskTrackChange, onClipTrackChange, onAudioClipTrackChange, onZoomTrackChange, onTrimTrackChange, onEffectTrackChange, onAnnotationTrackChange, onCursorTrackChange, onSpeedTrackChange, onTrackAutoTypeChange, isRecordingClip]);
 
   if (!videoDuration || videoDuration === 0) {
     return (
@@ -2282,13 +2747,19 @@ export default function TimelineEditor({
             onClick={addKeyframe}
             variant="ghost"
             size="icon"
-            disabled={!canKeyframeSelectedClip}
+            disabled={!canKeyframeSelectedClip && !canKeyframeSelectedMask}
             className="h-7 w-7 text-slate-400 disabled:opacity-40 hover:text-[#34B27B] hover:bg-[#34B27B]/10 transition-all"
-            title={canKeyframeSelectedClip ? "Add or update transform keyframe (F)" : "Select a visual clip and move the playhead onto it to keyframe transform"}
+            title={
+              canKeyframeSelectedClip
+                ? "Add or update transform keyframe (F)"
+                : canKeyframeSelectedMask
+                  ? "Add or update mask keyframe (F)"
+                  : "Select a visual clip or shape mask and move the playhead onto it to keyframe"
+            }
           >
             <Diamond
               className="w-4 h-4"
-              fill={selectedTransformKeyframeAtPlayhead ? 'currentColor' : 'none'}
+              fill={selectedTransformKeyframeAtPlayhead || selectedMaskKeyframeAtPlayhead ? 'currentColor' : 'none'}
             />
           </Button>
           <Button
@@ -2307,13 +2778,15 @@ export default function TimelineEditor({
                 ? deleteSelectedKeyframe
                 : selectedBackgroundId
                   ? () => onBackgroundDelete?.(selectedBackgroundId)
+                  : selectedMaskId
+                    ? deleteSelectedMask
                   : selectedAudioClipId
                     ? deleteSelectedAudioClip
                     : deleteSelectedClip
             }
             variant="ghost"
             size="icon"
-            disabled={!selectedKeyframeIds.length && !selectedClipId && !selectedAudioClipId && !selectedBackgroundId}
+            disabled={!selectedKeyframeIds.length && !selectedClipId && !selectedAudioClipId && !selectedBackgroundId && !selectedMaskId}
             className="h-7 w-7 text-slate-400 disabled:opacity-40 hover:text-[#ef4444] hover:bg-[#ef4444]/10 transition-all"
             title={selectedKeyframeIds.length > 0 ? "Delete selected keyframes (⌘/Ctrl + D)" : "Delete selected item (⌘/Ctrl + D)"}
           >
@@ -2491,13 +2964,7 @@ export default function TimelineEditor({
               <KeyframeMarkers
                 keyframes={timelineKeyframes}
                 selectedKeyframeIds={selectedKeyframeIds}
-                setSelectedKeyframeIds={setSelectedKeyframeIds}
-                onSelectKeyframe={(keyframe) => {
-                  if (keyframe.kind === 'clipTransform' && keyframe.clipId) {
-                    onSelectClip?.(keyframe.clipId);
-                  }
-                  onSeek?.(keyframe.time / 1000);
-                }}
+                onKeyframePointerDown={beginKeyframePointerDrag}
               />
             <Timeline
               items={timelineItems}
@@ -2510,6 +2977,7 @@ export default function TimelineEditor({
               currentTimeMs={currentTimeMs}
               onSeek={onSeek}
               onSelectBackground={onSelectBackground}
+              onSelectMask={onSelectMask}
               onSelectClip={onSelectClip}
               onSelectAudioClip={onSelectAudioClip}
               onSelectZoom={onSelectZoom}
@@ -2519,6 +2987,7 @@ export default function TimelineEditor({
               onSelectCursor={onSelectCursor}
               selectedKeyframeIds={selectedKeyframeIds}
               onSelectKeyframes={setSelectedKeyframeIds}
+              onMaskChange={onMaskChange}
               onClipAssetDrop={onClipAssetDrop}
               onBackgroundAssetDrop={onBackgroundAssetDrop}
               onAudioAssetDrop={onAudioAssetDrop}
@@ -2529,6 +2998,7 @@ export default function TimelineEditor({
               onTrackDelete={onTrackDelete}
               onTrackAutoTypeChange={onTrackAutoTypeChange}
               selectedBackgroundId={selectedBackgroundId}
+              selectedMaskId={selectedMaskId}
               selectedClipId={selectedClipId}
               selectedAudioClipId={selectedAudioClipId}
               selectedZoomId={selectedZoomId}
@@ -2538,6 +3008,7 @@ export default function TimelineEditor({
               selectedCursorId={selectedCursorId}
               selectedSpeedId={selectedSpeedId}
               onSelectSpeed={onSelectSpeed}
+              onKeyframePointerDown={beginKeyframePointerDrag}
             />
           </TimelineWrapper>
         </div>

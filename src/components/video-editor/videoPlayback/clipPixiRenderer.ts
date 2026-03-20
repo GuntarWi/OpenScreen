@@ -1,8 +1,9 @@
 import { Container, Graphics, Sprite, Texture, VideoSource } from 'pixi.js';
-import type { VideoAsset, VideoClip } from '../types';
+import type { MaskItem, MaskMatteMode, MaskPathPoint, VideoAsset, VideoClip } from '../types';
 import { applyChromaKeyToImageData, parseHexColor } from '@/utils/chromaKey';
 import { computeClipLayout } from '@/utils/clipLayout';
 import { resolveClipTransformStateAtTime, resolveClipTransformStateFromBase } from '@/utils/clipTransformKeyframes';
+import { getRenderableMaskPathsAtTime, resolveMaskPathsAtTime, type MaskState } from '@/utils/maskPathKeyframes';
 import { getSourceOffsetForTimelineOffsetMs } from '../clipSpeedUtils';
 import { smoothStep } from './mathUtils';
 
@@ -44,6 +45,12 @@ type ClipItem = {
   content: Container;
   sprite: Sprite;
   mask: Graphics;
+  userMask: Sprite;
+  userMaskCanvas: HTMLCanvasElement;
+  userMaskCtx: CanvasRenderingContext2D;
+  userMaskTempCanvas: HTMLCanvasElement;
+  userMaskTempCtx: CanvasRenderingContext2D;
+  userMaskTexture: Texture;
   pixelContainer: Container;
   pixelPieces: PixelPiece[];
   video: HTMLVideoElement | null;
@@ -75,6 +82,7 @@ type ClipItem = {
   recordingCropBounds?: { startX: number; endX: number; startY: number; endY: number };
   recordingBaseRect?: ClipInteractionRect;
   interactionRect?: ClipInteractionRect;
+  userMaskKey: string;
 };
 
 const PIXEL_GRID_ROWS = 4;
@@ -180,6 +188,159 @@ const clampRadius = (radius: number, width: number, height: number) => {
   return Math.max(0, Math.min(radius, width / 2, height / 2));
 };
 
+const getMaskRectPixels = (state: Pick<MaskState, 'position' | 'size'>, stageSize: StageSize) => ({
+  x: (state.position.x / 100) * stageSize.width,
+  y: (state.position.y / 100) * stageSize.height,
+  width: (state.size.width / 100) * stageSize.width,
+  height: (state.size.height / 100) * stageSize.height,
+});
+
+const getMaskExpandPixels = (expand: number, stageSize: StageSize) => (
+  (expand / 100) * Math.min(stageSize.width, stageSize.height)
+);
+
+const getMaskPointPixels = (point: MaskPathPoint, stageSize: StageSize) => ({
+  x: (point.x / 100) * stageSize.width,
+  y: (point.y / 100) * stageSize.height,
+  inX: (point.inX / 100) * stageSize.width,
+  inY: (point.inY / 100) * stageSize.height,
+  outX: (point.outX / 100) * stageSize.width,
+  outY: (point.outY / 100) * stageSize.height,
+});
+
+const getExpandedMaskPixelPoints = (
+  points: MaskPathPoint[],
+  stageSize: StageSize,
+  expandPx = 0,
+) => {
+  const pixelPoints = points.map((point) => getMaskPointPixels(point, stageSize));
+  if (Math.abs(expandPx) < 0.001) {
+    return pixelPoints;
+  }
+
+  const centerX = pixelPoints.reduce((sum, point) => sum + point.x, 0) / pixelPoints.length;
+  const centerY = pixelPoints.reduce((sum, point) => sum + point.y, 0) / pixelPoints.length;
+  return pixelPoints.map((point) => {
+    const dx = point.x - centerX;
+    const dy = point.y - centerY;
+    const distance = Math.max(Math.hypot(dx, dy), 0.0001);
+    const offsetX = (dx / distance) * expandPx;
+    const offsetY = (dy / distance) * expandPx;
+    return {
+      ...point,
+      x: point.x + offsetX,
+      y: point.y + offsetY,
+      inX: point.inX + offsetX,
+      inY: point.inY + offsetY,
+      outX: point.outX + offsetX,
+      outY: point.outY + offsetY,
+    };
+  });
+};
+
+const addMaskCanvasPath = (
+  ctx: CanvasRenderingContext2D,
+  state: MaskState,
+  stageSize: StageSize,
+) => {
+  const expandPx = getMaskExpandPixels(state.expand, stageSize);
+  if (state.shape === 'path') {
+    const points = state.pathPoints ?? [];
+    if (points.length < 2) {
+      return false;
+    }
+
+    const expandedPoints = getExpandedMaskPixelPoints(points, stageSize, expandPx);
+    ctx.moveTo(expandedPoints[0].x, expandedPoints[0].y);
+    for (let index = 0; index < expandedPoints.length; index += 1) {
+      const current = expandedPoints[index];
+      const next = expandedPoints[(index + 1) % expandedPoints.length];
+      ctx.bezierCurveTo(
+        current.outX,
+        current.outY,
+        next.inX,
+        next.inY,
+        next.x,
+        next.y,
+      );
+    }
+    ctx.closePath();
+    return true;
+  }
+
+  const rawRect = getMaskRectPixels(state, stageSize);
+  const rect = {
+    x: rawRect.x - expandPx,
+    y: rawRect.y - expandPx,
+    width: rawRect.width + expandPx * 2,
+    height: rawRect.height + expandPx * 2,
+  };
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+
+  if (state.shape === 'ellipse') {
+    ctx.ellipse(
+      rect.x + rect.width / 2,
+      rect.y + rect.height / 2,
+      rect.width / 2,
+      rect.height / 2,
+      0,
+      0,
+      Math.PI * 2,
+    );
+  } else {
+    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+  }
+
+  return true;
+};
+
+const ensureMaskCanvasSize = (item: ClipItem, stageSize: StageSize) => {
+  const width = Math.max(1, Math.round(stageSize.width));
+  const height = Math.max(1, Math.round(stageSize.height));
+  if (item.userMaskCanvas.width !== width || item.userMaskCanvas.height !== height) {
+    item.userMaskCanvas.width = width;
+    item.userMaskCanvas.height = height;
+  }
+  if (item.userMaskTempCanvas.width !== width || item.userMaskTempCanvas.height !== height) {
+    item.userMaskTempCanvas.width = width;
+    item.userMaskTempCanvas.height = height;
+  }
+};
+
+const drawMaskPathToCanvas = (
+  targetCtx: CanvasRenderingContext2D,
+  tempCtx: CanvasRenderingContext2D,
+  tempCanvas: HTMLCanvasElement,
+  state: MaskState,
+  stageSize: StageSize,
+) => {
+  tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+  tempCtx.save();
+  tempCtx.filter = state.feather > 0.01
+    ? `blur(${Math.max(0.5, getMaskExpandPixels(state.feather, stageSize)).toFixed(2)}px)`
+    : 'none';
+  tempCtx.fillStyle = '#ffffff';
+  tempCtx.beginPath();
+  const hasPath = addMaskCanvasPath(tempCtx, state, stageSize);
+  if (hasPath) {
+    tempCtx.fill();
+  }
+  tempCtx.restore();
+
+  if (!hasPath) {
+    return;
+  }
+
+  targetCtx.save();
+  targetCtx.globalCompositeOperation = state.invert || state.mode === 'subtract'
+    ? 'destination-out'
+    : 'source-over';
+  targetCtx.drawImage(tempCanvas, 0, 0);
+  targetCtx.restore();
+};
+
 const getTransformedBounds = ({
   box,
   anchor,
@@ -188,6 +349,8 @@ const getTransformedBounds = ({
   rotationDeg,
   parentScale,
   parentPosition,
+  position,
+  localSize,
 }: {
   box: ClipInteractionRect;
   anchor: { x: number; y: number };
@@ -196,19 +359,23 @@ const getTransformedBounds = ({
   rotationDeg: number;
   parentScale: { x: number; y: number };
   parentPosition: { x: number; y: number };
+  position?: { x: number; y: number };
+  localSize?: { width: number; height: number };
 }): ClipInteractionRect => {
-  const pivotX = box.width * anchor.x;
-  const pivotY = box.height * anchor.y;
-  const positionX = box.x + box.width * anchor.x;
-  const positionY = box.y + box.height * anchor.y;
+  const localWidth = localSize?.width ?? box.width;
+  const localHeight = localSize?.height ?? box.height;
+  const pivotX = localWidth * anchor.x;
+  const pivotY = localHeight * anchor.y;
+  const positionX = position?.x ?? (box.x + box.width * anchor.x);
+  const positionY = position?.y ?? (box.y + box.height * anchor.y);
   const rotation = rotationDeg * DEG_TO_RAD;
   const cos = Math.cos(rotation);
   const sin = Math.sin(rotation);
   const corners = [
     { x: 0, y: 0 },
-    { x: box.width, y: 0 },
-    { x: box.width, y: box.height },
-    { x: 0, y: box.height },
+    { x: localWidth, y: 0 },
+    { x: localWidth, y: localHeight },
+    { x: 0, y: localHeight },
   ];
 
   const worldPoints = corners.map((corner) => {
@@ -408,6 +575,7 @@ export class ClipPixiRenderer {
   private items = new Map<string, ClipItem>();
   private assetMap = new Map<string, VideoAsset>();
   private clips: VideoClip[] = [];
+  private maskItems: MaskItem[] = [];
   private externalVideos = new Map<string, ExternalVideoSource>();
   private stageSize: StageSize = { width: 0, height: 0 };
   private recordingLayout: RecordingLayoutConfig | null = null;
@@ -427,6 +595,13 @@ export class ClipPixiRenderer {
 
   setAssets(assets: VideoAsset[]) {
     this.assetMap = new Map(assets.map((asset) => [asset.id, asset]));
+  }
+
+  setMaskItems(maskItems: MaskItem[]) {
+    this.maskItems = maskItems;
+    this.items.forEach((item) => {
+      item.userMaskKey = '';
+    });
   }
 
   setExternalVideo(assetId: string, video: HTMLVideoElement, options?: { allowSeek?: boolean }) {
@@ -488,6 +663,7 @@ export class ClipPixiRenderer {
     this.stageSize = { ...size };
     this.items.forEach((item) => {
       item.layoutKey = '';
+      item.userMaskKey = '';
     });
   }
 
@@ -632,6 +808,17 @@ export class ClipPixiRenderer {
     // Don't set content.mask here - an empty mask blocks all visibility.
     // The mask will be set in updateLayoutForItem after it has content.
 
+    const userMaskCanvas = document.createElement('canvas');
+    const userMaskCtx = userMaskCanvas.getContext('2d', { willReadFrequently: true });
+    const userMaskTempCanvas = document.createElement('canvas');
+    const userMaskTempCtx = userMaskTempCanvas.getContext('2d', { willReadFrequently: true });
+    if (!userMaskCtx || !userMaskTempCtx) {
+      throw new Error('Failed to create mask canvas context');
+    }
+    const userMaskTexture = Texture.from(userMaskCanvas);
+    const userMask = new Sprite(userMaskTexture);
+    this.root.addChild(userMask);
+
     const isImageAsset = asset.kind === 'image';
     const external = isImageAsset ? null : this.externalVideos.get(clip.assetId);
     const isExternal = Boolean(external);
@@ -669,6 +856,12 @@ export class ClipPixiRenderer {
       content,
       sprite,
       mask,
+      userMask,
+      userMaskCanvas,
+      userMaskCtx,
+      userMaskTempCanvas,
+      userMaskTempCtx,
+      userMaskTexture,
       pixelContainer,
       pixelPieces,
       video,
@@ -688,6 +881,7 @@ export class ClipPixiRenderer {
       chromaCtx,
       chromaTexture,
       readyPromise: video ? ensureVideoReady(video) : image ? ensureImageReady(image) : undefined,
+      userMaskKey: '',
     };
 
     const updateFrame = () => {
@@ -1046,6 +1240,14 @@ export class ClipPixiRenderer {
           rotationDeg: resolvedState.rotationDeg ?? 0,
           parentScale: { x: scale, y: scale },
           parentPosition: { x: cameraX + slideOffsetX, y: cameraY + slideOffsetY },
+          position: {
+            x: resolvedBox.x + resolvedBox.width * anchor.x,
+            y: resolvedBox.y + resolvedBox.height * anchor.y,
+          },
+          localSize: {
+            width: baseRect.width,
+            height: baseRect.height,
+          },
         });
       }
       return;
@@ -1083,6 +1285,139 @@ export class ClipPixiRenderer {
     item.container.alpha = opacity;
     item.content.alpha = 1;
     item.interactionRect = undefined;
+  }
+
+  private updateItemMask(item: ClipItem, timeMs: number) {
+    const stageWidth = this.stageSize.width;
+    const stageHeight = this.stageSize.height;
+    if (stageWidth <= 0 || stageHeight <= 0) {
+      item.container.mask = null;
+      item.userMaskCtx.clearRect(0, 0, item.userMaskCanvas.width, item.userMaskCanvas.height);
+      item.userMaskTexture.source.update();
+      item.userMaskKey = '';
+      return;
+    }
+
+    ensureMaskCanvasSize(item, this.stageSize);
+    item.userMask.position.set(0, 0);
+    item.userMask.width = stageWidth;
+    item.userMask.height = stageHeight;
+
+    const activeMasks = this.maskItems
+      .filter((mask) => (
+        mask.targetClipId === item.clip.id &&
+        timeMs >= mask.startMs &&
+        timeMs <= mask.endMs
+      ))
+      .map((mask) => ({
+        mask,
+        allPaths: resolveMaskPathsAtTime(mask, timeMs),
+        renderablePaths: getRenderableMaskPathsAtTime(mask, timeMs),
+      }))
+      .sort((a, b) => a.mask.startMs - b.mask.startMs || a.mask.id.localeCompare(b.mask.id));
+
+    const matteMask = activeMasks.find((entry) => (entry.mask.matteMode ?? 'shape') !== 'shape');
+    const matteSourceItem = matteMask
+      ? this.findTrackMatteSourceItem(item, matteMask.mask.matteMode ?? 'shape', timeMs)
+      : null;
+
+    const maskKey = activeMasks.map(({ mask, allPaths, renderablePaths }) => [
+      mask.id,
+      mask.matteMode ?? 'shape',
+      matteSourceItem?.clip.id ?? 'none',
+      ...allPaths.flatMap((state) => [
+        state.id,
+        state.visible ? 1 : 0,
+        state.solo ? 1 : 0,
+        state.shape,
+        state.mode,
+        state.invert ? 1 : 0,
+        state.feather.toFixed(3),
+        state.expand.toFixed(3),
+        state.position.x.toFixed(3),
+        state.position.y.toFixed(3),
+        state.size.width.toFixed(3),
+        state.size.height.toFixed(3),
+        ...(state.pathPoints ?? []).flatMap((point) => [
+          point.x.toFixed(3),
+          point.y.toFixed(3),
+          point.inX.toFixed(3),
+          point.inY.toFixed(3),
+          point.outX.toFixed(3),
+          point.outY.toFixed(3),
+        ]),
+      ]),
+      'renderable',
+      ...renderablePaths.map((state) => state.id),
+    ].join(':')).join('|');
+
+    if (maskKey === item.userMaskKey) {
+      return;
+    }
+
+    item.userMaskKey = maskKey;
+    item.userMaskCtx.clearRect(0, 0, item.userMaskCanvas.width, item.userMaskCanvas.height);
+
+    if (!activeMasks.length) {
+      item.container.mask = null;
+      item.userMaskTexture.source.update();
+      return;
+    }
+
+    if (matteMask) {
+      item.container.mask = matteSourceItem?.container ?? null;
+      item.userMaskTexture.source.update();
+      return;
+    }
+
+    const resolvedPaths = activeMasks.flatMap((entry) => entry.renderablePaths);
+    if (!resolvedPaths.length) {
+      item.container.mask = null;
+      item.userMaskTexture.source.update();
+      return;
+    }
+
+    const shouldStartFull = resolvedPaths.every((path) => path.invert || path.mode === 'subtract');
+
+    if (shouldStartFull) {
+      item.userMaskCtx.fillStyle = '#ffffff';
+      item.userMaskCtx.fillRect(0, 0, stageWidth, stageHeight);
+    }
+
+    resolvedPaths.forEach((state) => {
+      drawMaskPathToCanvas(
+        item.userMaskCtx,
+        item.userMaskTempCtx,
+        item.userMaskTempCanvas,
+        state,
+        this.stageSize,
+      );
+    });
+
+    item.userMaskTexture.source.update();
+    item.container.mask = item.userMask;
+  }
+
+  private findTrackMatteSourceItem(item: ClipItem, matteMode: MaskMatteMode, timeMs: number): ClipItem | null {
+    if (matteMode === 'shape') {
+      return null;
+    }
+
+    const direction = matteMode === 'track-above' ? 1 : -1;
+    const candidates = [...this.items.values()]
+      .filter((candidate) => (
+        candidate.clip.id !== item.clip.id &&
+        timeMs >= candidate.clip.startMs &&
+        timeMs <= candidate.clip.endMs &&
+        candidate.container.visible
+      ))
+      .sort((a, b) => (a.clip.zIndex - b.clip.zIndex) * direction);
+
+    return candidates.find((candidate) => (
+      matteMode === 'track-above'
+        ? candidate.clip.zIndex > item.clip.zIndex
+        : candidate.clip.zIndex < item.clip.zIndex
+    )) ?? null;
   }
 
   private syncVideoTime(item: ClipItem, timeMs: number, isActive: boolean, shouldPlay: boolean) {
@@ -1217,6 +1552,7 @@ export class ClipPixiRenderer {
 
     const effectState = getClipEffectState(clip, timeMs);
     this.updateItemTransform(item, resolvedClip, effectState, keyframeTimeMs);
+    this.updateItemMask(item, timeMs);
 
     const enterEffect = clip.enterEffect ?? 'none';
     const exitEffect = clip.exitEffect ?? 'none';
@@ -1308,9 +1644,13 @@ export class ClipPixiRenderer {
       item.video.removeEventListener('loadeddata', item.onLoadedData);
     }
     item.content.mask = null;
+    item.container.mask = null;
     item.container.removeFromParent();
+    item.userMask.removeFromParent();
     item.sprite.destroy({ texture: false });
     item.mask.destroy();
+    item.userMask.destroy({ texture: false });
+    item.userMaskTexture.destroy(true);
     item.pixelContainer.destroy({ children: true });
     item.container.destroy({ children: false });
     item.videoTexture?.destroy(true);

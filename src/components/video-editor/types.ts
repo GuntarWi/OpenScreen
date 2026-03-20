@@ -134,6 +134,65 @@ export interface BackgroundItem {
   rippleCount?: number;
 }
 
+export type MaskShapeType = 'rect' | 'ellipse' | 'path';
+export type MaskCompositeMode = 'add' | 'subtract';
+export type MaskMatteMode = 'shape' | 'track-above' | 'track-below';
+
+export interface MaskPathPoint {
+  id: string;
+  x: number;
+  y: number;
+  inX: number;
+  inY: number;
+  outX: number;
+  outY: number;
+}
+
+export interface MaskPathKeyframe {
+  id: string;
+  timeMs: number;
+  shape: MaskShapeType;
+  position: AnnotationPosition;
+  size: AnnotationSize;
+  pathPoints?: MaskPathPoint[];
+  curveToNext?: ClipTransformBezier;
+}
+
+export interface MaskPath {
+  id: string;
+  shape: MaskShapeType;
+  mode?: MaskCompositeMode;
+  invert?: boolean;
+  visible?: boolean;
+  solo?: boolean;
+  position: AnnotationPosition;
+  size: AnnotationSize;
+  pathPoints?: MaskPathPoint[];
+  pathKeyframes?: MaskPathKeyframe[];
+  feather?: number;
+  expand?: number;
+}
+
+export interface MaskItem {
+  id: string;
+  trackId?: string;
+  startMs: number;
+  endMs: number;
+  targetClipId: string;
+  activePathId?: string;
+  paths?: MaskPath[];
+  shape: MaskShapeType;
+  mode?: MaskCompositeMode;
+  invert?: boolean;
+  matteMode?: MaskMatteMode;
+  position: AnnotationPosition;
+  size: AnnotationSize;
+  pathPoints?: MaskPathPoint[];
+  pathKeyframes?: MaskPathKeyframe[];
+  feather?: number;
+  expand?: number;
+}
+
 export type VideoClipFit = 'contain' | 'cover';
 
 export interface VideoClipCrop {
@@ -369,6 +428,7 @@ export type TimelineTrackType =
   | 'background'
   | 'recording'
   | 'generic'
+  | 'mask'
   | 'video'
   | 'audio'
   | 'zoom'
@@ -381,6 +441,7 @@ export type TimelineTrackType =
 export type TimelineTrackItemType =
   | 'background'
   | 'mixed'
+  | 'mask'
   | 'videoClip'
   | 'audioClip'
   | 'zoom'
@@ -392,6 +453,7 @@ export type TimelineTrackItemType =
 
 export type TimelineTrackTemplate =
   | 'generic'
+  | 'mask'
   | 'video'
   | 'audio'
   | 'zoom'
@@ -459,7 +521,8 @@ export const ZOOM_DEPTH_SCALES: Record<ZoomDepth, number> = {
 
 export const DEFAULT_ZOOM_DEPTH: ZoomDepth = 3;
 
-export function clampFocusToDepth(focus: ZoomFocus, _depth: ZoomDepth): ZoomFocus {
+export function clampFocusToDepth(focus: ZoomFocus, depth: ZoomDepth): ZoomFocus {
+  void depth;
   return {
     cx: clamp(focus.cx, 0, 1),
     cy: clamp(focus.cy, 0, 1),

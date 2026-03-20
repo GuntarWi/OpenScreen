@@ -15,6 +15,7 @@ import {
   RECORDING_ASSET_ID,
   DEFAULT_CURSOR_STYLE,
   type BackgroundItem,
+  type MaskItem,
   type ZoomRegion,
   type ZoomFocus,
   type ZoomDepth,
@@ -44,6 +45,7 @@ import { RetroGrid } from "@/components/ui/retro-grid";
 import { Ripple } from "@/components/ui/ripple";
 import { AnnotationContentView, AnnotationOverlay } from "./AnnotationOverlay";
 import { ClipVideoItem } from "./ClipVideoItem";
+import { MaskShapeItem } from "./MaskShapeItem";
 import {
   computeEffectState,
   DEFAULT_EFFECT_STATE,
@@ -88,6 +90,7 @@ interface VideoPlaybackProps {
   onError: (error: string) => void;
   wallpaper?: string;
   backgroundItems?: BackgroundItem[];
+  maskItems?: MaskItem[];
   zoomRegions: ZoomRegion[];
   selectedZoomId: string | null;
   onSelectZoom: (id: string | null) => void;
@@ -114,10 +117,14 @@ interface VideoPlaybackProps {
   videoAssets?: VideoAsset[];
   videoClips?: VideoClip[];
   selectedClipId?: string | null;
+  selectedMaskId?: string | null;
   onSelectClip?: (id: string | null) => void;
   onClipPositionChange?: (id: string, position: { x: number; y: number }) => void;
   onClipSizeChange?: (id: string, size: { width: number; height: number }) => void;
   onClipRectChange?: (id: string, rect: InteractionRect) => void;
+  onSelectMask?: (id: string | null) => void;
+  onMaskRectChange?: (id: string, rect: InteractionRect) => void;
+  onMaskChange?: (id: string, patch: Partial<MaskItem>) => void;
   cursorTrack?: CursorTrack | null;
   cursorEnabled?: boolean;
   cursorSmoothing?: CursorSmoothing;
@@ -153,6 +160,7 @@ function VideoPlayback(
     onError,
     wallpaper,
     backgroundItems = [],
+    maskItems = [],
     zoomRegions,
     selectedZoomId,
     onSelectZoom,
@@ -179,10 +187,14 @@ function VideoPlayback(
     videoAssets = [],
     videoClips = [],
     selectedClipId,
+    selectedMaskId,
     onSelectClip,
     onClipPositionChange,
     onClipSizeChange,
     onClipRectChange,
+    onSelectMask,
+    onMaskRectChange,
+    onMaskChange,
     cursorTrack,
     cursorEnabled = true,
     cursorSmoothing = 'none',
@@ -222,6 +234,7 @@ function VideoPlayback(
   const videoDurationMsRef = useRef(0);
   const clipRendererRef = useRef<ClipPixiRenderer | null>(null);
   const videoClipsRef = useRef<VideoClip[]>([]);
+  const maskItemsRef = useRef<MaskItem[]>([]);
   const videoAssetsRef = useRef<VideoAsset[]>([]);
   const selectedClipIdRef = useRef<string | null>(null);
   const extendedPlaybackRef = useRef(false);
@@ -1161,6 +1174,7 @@ function VideoPlayback(
       const clipRenderer = clipRendererRef.current;
       if (clipRenderer) {
         clipRenderer.setStageSize(result.stageSize);
+        clipRenderer.setMaskItems(maskItemsRef.current);
         clipRenderer.syncClips(videoClipsRef.current);
         clipRenderer.setRecordingLayout({
           cropRegion: cropRegion ?? { x: 0, y: 0, width: 1, height: 1 },
@@ -1422,6 +1436,10 @@ function VideoPlayback(
   }, [videoClips]);
 
   useEffect(() => {
+    maskItemsRef.current = maskItems;
+  }, [maskItems]);
+
+  useEffect(() => {
     videoAssetsRef.current = videoAssets;
   }, [videoAssets]);
 
@@ -1449,6 +1467,7 @@ function VideoPlayback(
     const renderer = clipRendererRef.current;
     if (!renderer) return;
     renderer.setAssets(videoAssets);
+    renderer.setMaskItems(maskItems);
     renderer.syncClips(videoClips);
     renderer.setStageSize(stageSizeRef.current);
     const video = videoRef.current;
@@ -1461,7 +1480,7 @@ function VideoPlayback(
       borderRadius: borderRadius ?? 0,
       screenOffsetPx: screenOffsetPxRef.current,
     });
-  }, [pixiReady, videoReady, videoAssets, videoClips, cropRegion, padding, borderRadius]);
+  }, [pixiReady, videoReady, videoAssets, videoClips, maskItems, cropRegion, padding, borderRadius]);
 
   // Follow anchor ref and keep props in refs for synchronous access in ticker
   const followAnchorRef = useRef<ZoomFocus | null>(null);
@@ -2138,6 +2157,7 @@ function VideoPlayback(
       const clipRenderer = new ClipPixiRenderer(workspaceContainer);
       clipRenderer.setZIndex(1);
       clipRenderer.setAssets(videoAssetsRef.current);
+      clipRenderer.setMaskItems(maskItemsRef.current);
       clipRenderer.syncClips(videoClipsRef.current);
       clipRenderer.setStageSize(stageSizeRef.current);
       clipRendererRef.current = clipRenderer;
@@ -3045,6 +3065,14 @@ function VideoPlayback(
       .filter((clip) => timeMs >= clip.startMs && timeMs <= clip.endMs)
       .sort((a, b) => a.zIndex - b.zIndex);
   }, [videoClips, timeMs]);
+  const selectedMask = useMemo(
+    () => (selectedMaskId ? maskItems.find((item) => item.id === selectedMaskId) ?? null : null),
+    [maskItems, selectedMaskId],
+  );
+  const selectedMaskTargetVisible = useMemo(
+    () => Boolean(selectedMask && activeClipRegions.some((clip) => clip.id === selectedMask.targetClipId)),
+    [activeClipRegions, selectedMask],
+  );
 
   const shadowFilter = (showShadow && shadowIntensity > 0)
     ? `drop-shadow(0 ${shadowIntensity * 12}px ${shadowIntensity * 48}px rgba(0,0,0,${shadowIntensity * 0.7})) drop-shadow(0 ${shadowIntensity * 4}px ${shadowIntensity * 16}px rgba(0,0,0,${shadowIntensity * 0.5})) drop-shadow(0 ${shadowIntensity * 2}px ${shadowIntensity * 8}px rgba(0,0,0,${shadowIntensity * 0.3}))`
@@ -3241,7 +3269,7 @@ function VideoPlayback(
               className="absolute inset-0 select-none"
               style={{
                 zIndex: 8,
-                pointerEvents: selectedClipId && !isPlaying && !workspaceInteractionLocked ? 'auto' : 'none',
+                pointerEvents: (selectedClipId || selectedMaskId) && !isPlaying && !workspaceInteractionLocked ? 'auto' : 'none',
                 transformStyle: 'preserve-3d',
                 backfaceVisibility: 'hidden',
               }}
@@ -3284,7 +3312,7 @@ function VideoPlayback(
 
                   const parentTransform = `${clipVideoLayerRef.current?.style.transform || 'none'}|${stageTranslation}`;
 
-                  return activeClipRegions.map((region) => {
+                  const clipItems = activeClipRegions.map((region) => {
                     if (!videoAssetMap.has(region.assetId)) return null;
                     let interactionRect = clipRendererRef.current?.getClipInteractionRect(region.id) ?? null;
                     if (!interactionRect) {
@@ -3350,6 +3378,24 @@ function VideoPlayback(
                       />
                     );
                   });
+
+                  const maskItem = selectedMask ? (
+                    <MaskShapeItem
+                      key={selectedMask.id}
+                      mask={selectedMask}
+                      containerWidth={containerWidth}
+                      containerHeight={containerHeight}
+                      currentTimeMs={timeMs}
+                      isPlaying={isPlaying}
+                      isSelected={selectedMask.id === selectedMaskId}
+                      targetClipVisible={selectedMaskTargetVisible}
+                      onSelect={(id) => onSelectMask?.(id)}
+                      onRectChange={(id, rect) => onMaskRectChange?.(id, rect)}
+                      onChange={(id, patch) => onMaskChange?.(id, patch)}
+                    />
+                  ) : null;
+
+                  return [...clipItems, maskItem];
                 })()}
               </div>
             </div>

@@ -1,7 +1,7 @@
 import { useItem } from "dnd-timeline";
 import type { Span } from "dnd-timeline";
 import { cn } from "@/lib/utils";
-import { ZoomIn, Scissors, MessageSquare, MousePointer2, Sparkles, Clapperboard, AudioLines, Gauge, ImageIcon } from "lucide-react";
+import { ZoomIn, Scissors, MessageSquare, MousePointer2, Sparkles, Clapperboard, AudioLines, Gauge, ImageIcon, Square } from "lucide-react";
 import glassStyles from "./ItemGlass.module.css";
 import { clamp01 } from "../videoPlayback/mathUtils";
 
@@ -14,7 +14,7 @@ interface ItemProps {
   isSelected?: boolean;
   onSelect?: () => void;
   zoomDepth?: number;
-  variant?: 'background' | 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'audio' | 'speed';
+  variant?: 'background' | 'mask' | 'zoom' | 'trim' | 'annotation' | 'cursor' | 'effect' | 'clip' | 'audio' | 'speed';
   annotationType?: 'text' | 'image' | 'figure' | 'emoji';
   speedValue?: number;
   keyframes?: Array<{
@@ -22,8 +22,15 @@ interface ItemProps {
     time: number;
     isSelected?: boolean;
     isCurrent?: boolean;
+    color?: string;
+    pathId?: string;
   }>;
-  onKeyframeSelect?: (id: string, time: number, mode: "replace" | "toggle") => void;
+  onKeyframeSelect?: (id: string, time: number, mode: "replace" | "toggle", pathId?: string) => void;
+  onKeyframePointerDown?: (
+    event: React.PointerEvent,
+    keyframe: { id: string; time: number; pathId?: string },
+    mode: "replace" | "toggle",
+  ) => void;
 }
 
 const ZOOM_LABELS: Record<number, string> = {
@@ -62,6 +69,7 @@ export default function Item({
   speedValue,
   keyframes = [],
   onKeyframeSelect,
+  onKeyframePointerDown,
 }: ItemProps) {
   const { setNodeRef, attributes, listeners, itemStyle, itemContentStyle } = useItem({
     id,
@@ -71,6 +79,7 @@ export default function Item({
 
   const isZoom = variant === 'zoom';
   const isBackground = variant === 'background';
+  const isMask = variant === 'mask';
   const isTrim = variant === 'trim';
   const isClip = variant === 'clip';
   const isCursor = variant === 'cursor';
@@ -80,6 +89,8 @@ export default function Item({
   
   const glassClass = isBackground
     ? glassStyles.glassGreen
+    : isMask
+    ? glassStyles.glassBlue
     : isZoom
     ? glassStyles.glassGreen
     : isTrim 
@@ -98,6 +109,8 @@ export default function Item({
     
   const endCapColor = isBackground
     ? '#34B27B'
+    : isMask
+    ? '#14b8a6'
     : isZoom
     ? '#21916A'
     : isTrim 
@@ -176,38 +189,39 @@ export default function Item({
               </svg>
             </div>
           ) : null}
-          {isClip && visibleKeyframes.length > 0 ? (
+          {(isClip || isMask) && visibleKeyframes.length > 0 ? (
             <div className="absolute inset-x-2 top-1 h-3 z-30 pointer-events-none">
               {visibleKeyframes.map((keyframe) => {
                 const leftPercent = ((keyframe.time - span.start) / itemDuration) * 100;
+                const keyframeColor = keyframe.color ?? '#34B27B';
                 return (
                   <button
                     key={keyframe.id}
                     type="button"
-                    className="absolute top-0 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] border border-white/25 bg-[#34B27B] pointer-events-auto transition-transform hover:scale-110"
+                    className="absolute top-0 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] border border-white/25 pointer-events-auto transition-transform hover:scale-110"
                     data-keyframe-marker="true"
                     data-keyframe-id={keyframe.id}
                     style={{
                       left: `${leftPercent}%`,
+                      backgroundColor: keyframeColor,
                       opacity: keyframe.isCurrent ? 1 : 0.78,
                       boxShadow: keyframe.isSelected
-                        ? '0 0 0 2px rgba(52,178,123,0.4), 0 0 10px rgba(52,178,123,0.25)'
+                        ? `0 0 0 2px ${keyframeColor}66, 0 0 10px ${keyframeColor}55`
                         : keyframe.isCurrent
-                          ? '0 0 10px rgba(52,178,123,0.3)'
+                          ? `0 0 10px ${keyframeColor}55`
                           : 'none',
                     }}
-                    title={`Transform keyframe @ ${(keyframe.time / 1000).toFixed(2)}s`}
+                    title={`Keyframe @ ${(keyframe.time / 1000).toFixed(2)}s`}
                     onPointerDown={(event) => {
                       event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.stopPropagation();
+                      event.preventDefault();
+                      const mode = event.metaKey || event.ctrlKey || event.shiftKey ? "toggle" : "replace";
+                      if (onKeyframePointerDown) {
+                        onKeyframePointerDown(event, { id: keyframe.id, time: keyframe.time }, mode);
+                        return;
+                      }
                       onSelect?.();
-                      onKeyframeSelect?.(
-                        keyframe.id,
-                        keyframe.time,
-                        event.metaKey || event.ctrlKey || event.shiftKey ? "toggle" : "replace",
-                      );
+                      onKeyframeSelect?.(keyframe.id, keyframe.time, mode, keyframe.pathId);
                     }}
                   />
                 );
@@ -222,6 +236,13 @@ export default function Item({
             {isBackground ? (
               <>
                 <ImageIcon className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-semibold tracking-tight">
+                  {children}
+                </span>
+              </>
+            ) : isMask ? (
+              <>
+                <Square className="w-3.5 h-3.5" />
                 <span className="text-[11px] font-semibold tracking-tight">
                   {children}
                 </span>

@@ -1,6 +1,6 @@
 import { Application, BlurFilter } from 'pixi.js';
 import { getAssetPath } from '@/lib/assetPath';
-import { RECORDING_ASSET_ID, type ZoomRegion, CropRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe, BackgroundItem } from '@/components/video-editor/types';
+import { RECORDING_ASSET_ID, type ZoomRegion, CropRegion, AnnotationRegion, EffectRegion, ScreenOffset, VideoAsset, VideoClip, PaddingKeyframe, BackgroundItem, MaskItem } from '@/components/video-editor/types';
 import {
   DEFAULT_BACKGROUND_ACCENT_COLOR,
   DEFAULT_BACKGROUND_BACKDROP_COLOR,
@@ -30,12 +30,369 @@ const EFFECT_PERSPECTIVE = 1200;
 const SKEW_TO_TILT_RATIO = 0.55;
 const RAD_TO_DEG = 180 / Math.PI;
 const DEG_TO_RAD = Math.PI / 180;
+const RETRO_GRID_ANIMATION_DURATION_SECONDS = 15;
+const RETRO_GRID_GRID_HEIGHT_RATIO = 3;
+const RETRO_GRID_GRID_LINE_ALIGNMENT_OFFSET_PX = 0.5;
+const RETRO_GRID_GRID_LINE_ANTIALIAS_MULTIPLIER = 0.9;
+const RETRO_GRID_GRID_LINE_WIDTH_PX = 0.92;
+const RETRO_GRID_GRID_START_OFFSET_RATIO = -0.5;
+const RETRO_GRID_GRID_WIDTH_RATIO = 6;
+const RETRO_GRID_GRID_X_OFFSET_RATIO = -2;
+const RETRO_GRID_PERSPECTIVE_PX = 200;
+
+const RETRO_GRID_VERTEX_SHADER_SOURCE = `
+attribute vec2 a_position;
+
+void main() {
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+const RETRO_GRID_FRAGMENT_SHADER_SOURCE = `
+#extension GL_OES_standard_derivatives : enable
+precision highp float;
+
+uniform vec2 u_container_size;
+uniform vec2 u_viewport_size;
+uniform vec4 u_line_color;
+uniform float u_angle;
+uniform float u_cell_size;
+uniform float u_device_pixel_ratio;
+uniform float u_time;
+
+const float animationDurationSeconds = ${RETRO_GRID_ANIMATION_DURATION_SECONDS.toFixed(1)};
+const float gridHeightRatio = ${RETRO_GRID_GRID_HEIGHT_RATIO.toFixed(1)};
+const float gridStartOffsetRatio = ${RETRO_GRID_GRID_START_OFFSET_RATIO.toFixed(1)};
+const float gridWidthRatio = ${RETRO_GRID_GRID_WIDTH_RATIO.toFixed(1)};
+const float gridXOffsetRatio = ${RETRO_GRID_GRID_X_OFFSET_RATIO.toFixed(1)};
+const float gridLineAlignmentOffsetPx = ${RETRO_GRID_GRID_LINE_ALIGNMENT_OFFSET_PX.toFixed(1)};
+const float gridLineAntialiasMultiplier = ${RETRO_GRID_GRID_LINE_ANTIALIAS_MULTIPLIER.toFixed(1)};
+const float horizontalLodLevelOneEndPx = 5.6;
+const float horizontalLodLevelOneStartPx = 2.8;
+const float horizontalLodLevelTwoEndPx = 3.0;
+const float horizontalLodLevelTwoStartPx = 1.4;
+const float horizontalCompressionEndPx = 2.8;
+const float horizontalCompressionStartPx = 1.2;
+const float lineWidthPx = ${RETRO_GRID_GRID_LINE_WIDTH_PX.toFixed(2)};
+const float perspectivePx = ${RETRO_GRID_PERSPECTIVE_PX.toFixed(1)};
+const float gridTravelRatio = 0.5;
+const float verticalCompressionEndPx = 2.6;
+const float verticalCompressionStartPx = 1.0;
+const float verticalEdgeCompressionEnd = 0.95;
+const float verticalEdgeCompressionStart = 0.45;
+const float verticalLodLevelEnd = 0.64;
+const float verticalLodLevelStart = 0.22;
+const float verticalTopCompressionEndCells = 6.0;
+const float verticalTopCompressionStartCells = 2.0;
+
+float renderGridLine(
+  float wrappedCoord,
+  float antiAliasWidth,
+  float softnessBoost
+) {
+  return 1.0 - smoothstep(
+    lineWidthPx,
+    lineWidthPx + (antiAliasWidth * (1.5 + softnessBoost)),
+    wrappedCoord
+  );
+}
+
+void main() {
+  float angle = radians(clamp(u_angle, 1.0, 89.0));
+  float sinAngle = sin(angle);
+  float cosAngle = cos(angle);
+  vec2 screen = vec2(
+    (gl_FragCoord.x / u_device_pixel_ratio) - (u_container_size.x * 0.5),
+    (u_container_size.y * 0.5) - (gl_FragCoord.y / u_device_pixel_ratio)
+  );
+
+  vec3 rayOrigin = vec3(0.0, 0.0, perspectivePx);
+  vec3 rayDirection = normalize(vec3(screen, -perspectivePx));
+  vec3 planeXAxis = vec3(1.0, 0.0, 0.0);
+  vec3 planeYAxis = vec3(0.0, cosAngle, sinAngle);
+  vec3 planeNormal = normalize(cross(planeXAxis, planeYAxis));
+  float denominator = dot(rayDirection, planeNormal);
+
+  if (abs(denominator) < 0.0001) {
+    discard;
+  }
+
+  float distanceToPlane = dot(-rayOrigin, planeNormal) / denominator;
+
+  if (distanceToPlane <= 0.0) {
+    discard;
+  }
+
+  vec3 hitPoint = rayOrigin + (rayDirection * distanceToPlane);
+  float localX = hitPoint.x;
+  float localY = dot(hitPoint, planeYAxis);
+  float gridWidth = u_viewport_size.x * gridWidthRatio;
+  float gridHeight = u_viewport_size.y * gridHeightRatio;
+  float gridScrollSpeed = (gridHeight * gridTravelRatio) / animationDurationSeconds;
+  float patternOffsetY = u_time * gridScrollSpeed;
+  float gridLeft = (-0.5 * u_container_size.x) + (gridXOffsetRatio * u_container_size.x);
+  float gridTop = (-0.5 * u_container_size.y) + (gridStartOffsetRatio * gridHeight);
+  vec2 planePosition = vec2(localX - gridLeft, localY - gridTop);
+
+  if (
+    planePosition.x < 0.0 ||
+    planePosition.y < 0.0 ||
+    planePosition.x > gridWidth ||
+    planePosition.y > gridHeight
+  ) {
+    discard;
+  }
+
+  vec2 patternPosition = vec2(planePosition.x, planePosition.y - patternOffsetY);
+  vec2 wrapped = mod(
+    patternPosition + vec2(gridLineAlignmentOffsetPx),
+    u_cell_size
+  );
+  vec2 patternDerivative = max(fwidth(patternPosition), vec2(0.0001));
+  vec2 antiAliasWidth = patternDerivative * gridLineAntialiasMultiplier;
+  float horizontalCellSpanPx = u_cell_size / patternDerivative.y;
+  float horizontalCompression = 1.0 - smoothstep(
+    horizontalCompressionStartPx,
+    horizontalCompressionEndPx,
+    horizontalCellSpanPx
+  );
+  float verticalCellSpanPx = u_cell_size / patternDerivative.x;
+  float sideDistance = abs((planePosition.x / gridWidth) * 2.0 - 1.0);
+  float verticalEdgeCompression = smoothstep(
+    verticalEdgeCompressionStart,
+    verticalEdgeCompressionEnd,
+    sideDistance
+  );
+  float verticalTopCompression = 1.0 - smoothstep(
+    u_cell_size * verticalTopCompressionStartCells,
+    u_cell_size * verticalTopCompressionEndCells,
+    planePosition.y
+  );
+  float verticalCompression =
+    (1.0 - smoothstep(
+      verticalCompressionStartPx,
+      verticalCompressionEndPx,
+      verticalCellSpanPx
+    )) * verticalEdgeCompression * verticalTopCompression;
+  float horizontalSoftnessBoost = 1.0 + (horizontalCompression * 3.0);
+  float verticalSoftnessBoost = 1.0 + (verticalCompression * 3.5);
+  float verticalLod = smoothstep(
+    verticalLodLevelStart,
+    verticalLodLevelEnd,
+    verticalCompression
+  );
+  float verticalLineFine = renderGridLine(
+    wrapped.x,
+    antiAliasWidth.x,
+    verticalSoftnessBoost
+  );
+  float verticalWrappedLod = mod(
+    patternPosition.x + gridLineAlignmentOffsetPx,
+    u_cell_size * 2.0
+  );
+  float verticalLineCoarse = renderGridLine(
+    verticalWrappedLod,
+    antiAliasWidth.x,
+    verticalSoftnessBoost + verticalLod
+  );
+  float verticalLine = max(
+    verticalLineFine * (1.0 - verticalLod),
+    verticalLineCoarse * verticalLod
+  );
+  float horizontalLodLevelOne = 1.0 - smoothstep(
+    horizontalLodLevelOneStartPx,
+    horizontalLodLevelOneEndPx,
+    horizontalCellSpanPx
+  );
+  float horizontalLodLevelTwo = 1.0 - smoothstep(
+    horizontalLodLevelTwoStartPx,
+    horizontalLodLevelTwoEndPx,
+    horizontalCellSpanPx
+  );
+  float horizontalLineFine = renderGridLine(
+    wrapped.y,
+    antiAliasWidth.y,
+    horizontalSoftnessBoost
+  );
+  float horizontalWrappedLodOne = mod(
+    patternPosition.y + gridLineAlignmentOffsetPx,
+    u_cell_size * 2.0
+  );
+  float horizontalWrappedLodTwo = mod(
+    patternPosition.y + gridLineAlignmentOffsetPx,
+    u_cell_size * 4.0
+  );
+  float horizontalLineCoarse = renderGridLine(
+    horizontalWrappedLodOne,
+    antiAliasWidth.y,
+    horizontalSoftnessBoost + horizontalLodLevelOne
+  );
+  float horizontalLineExtraCoarse = renderGridLine(
+    horizontalWrappedLodTwo,
+    antiAliasWidth.y,
+    horizontalSoftnessBoost + horizontalLodLevelOne + horizontalLodLevelTwo
+  );
+  float horizontalLineReduced = max(
+    horizontalLineFine * (1.0 - horizontalLodLevelOne),
+    horizontalLineCoarse * horizontalLodLevelOne
+  );
+  float horizontalLine = max(
+    horizontalLineReduced * (1.0 - horizontalLodLevelTwo),
+    horizontalLineExtraCoarse * horizontalLodLevelTwo
+  );
+  float line = max(verticalLine, horizontalLine);
+
+  if (line <= 0.001) {
+    discard;
+  }
+
+  float alpha = u_line_color.a * line;
+  gl_FragColor = vec4(u_line_color.rgb * alpha, alpha);
+}
+`;
+
+interface RetroGridProgramInfo {
+  attributeLocation: number;
+  program: WebGLProgram;
+  uniforms: {
+    angle: WebGLUniformLocation;
+    cellSize: WebGLUniformLocation;
+    containerSize: WebGLUniformLocation;
+    devicePixelRatio: WebGLUniformLocation;
+    lineColor: WebGLUniformLocation;
+    time: WebGLUniformLocation;
+    viewportSize: WebGLUniformLocation;
+  };
+}
+
+let retroGridColorResolveContext: CanvasRenderingContext2D | null | undefined;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function createRetroGridShader(
+  gl: WebGLRenderingContext,
+  type: number,
+  source: string,
+): WebGLShader | null {
+  const shader = gl.createShader(type);
+  if (!shader) return null;
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    return shader;
+  }
+  gl.deleteShader(shader);
+  return null;
+}
+
+function createRetroGridProgram(gl: WebGLRenderingContext): WebGLProgram | null {
+  const vertexShader = createRetroGridShader(gl, gl.VERTEX_SHADER, RETRO_GRID_VERTEX_SHADER_SOURCE);
+  const fragmentShader = createRetroGridShader(gl, gl.FRAGMENT_SHADER, RETRO_GRID_FRAGMENT_SHADER_SOURCE);
+  if (!vertexShader || !fragmentShader) {
+    return null;
+  }
+
+  const program = gl.createProgram();
+  if (!program) {
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    return null;
+  }
+
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    return program;
+  }
+
+  gl.deleteProgram(program);
+  return null;
+}
+
+function getRetroGridProgramInfo(
+  gl: WebGLRenderingContext,
+  program: WebGLProgram,
+): RetroGridProgramInfo | null {
+  const attributeLocation = gl.getAttribLocation(program, 'a_position');
+  const angle = gl.getUniformLocation(program, 'u_angle');
+  const cellSize = gl.getUniformLocation(program, 'u_cell_size');
+  const containerSize = gl.getUniformLocation(program, 'u_container_size');
+  const devicePixelRatio = gl.getUniformLocation(program, 'u_device_pixel_ratio');
+  const lineColor = gl.getUniformLocation(program, 'u_line_color');
+  const time = gl.getUniformLocation(program, 'u_time');
+  const viewportSize = gl.getUniformLocation(program, 'u_viewport_size');
+
+  if (
+    attributeLocation < 0 ||
+    !angle ||
+    !cellSize ||
+    !containerSize ||
+    !devicePixelRatio ||
+    !lineColor ||
+    !time ||
+    !viewportSize
+  ) {
+    return null;
+  }
+
+  return {
+    attributeLocation,
+    program,
+    uniforms: {
+      angle,
+      cellSize,
+      containerSize,
+      devicePixelRatio,
+      lineColor,
+      time,
+      viewportSize,
+    },
+  };
+}
+
+function getRetroGridColorResolveContext(): CanvasRenderingContext2D | null {
+  if (retroGridColorResolveContext !== undefined) {
+    return retroGridColorResolveContext;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  retroGridColorResolveContext = canvas.getContext('2d', { willReadFrequently: true });
+  return retroGridColorResolveContext;
+}
+
+function resolveRetroGridLineColor(color: string, alpha = 1): Float32Array {
+  const context = getRetroGridColorResolveContext();
+  if (!context) {
+    return new Float32Array([0.5, 0.5, 0.5, alpha]);
+  }
+
+  context.clearRect(0, 0, 1, 1);
+  context.fillStyle = color;
+  context.fillRect(0, 0, 1, 1);
+  const pixel = context.getImageData(0, 0, 1, 1).data;
+
+  return new Float32Array([
+    pixel[0] / 255,
+    pixel[1] / 255,
+    pixel[2] / 255,
+    (pixel[3] / 255) * alpha,
+  ]);
+}
 
 interface FrameRenderConfig {
   width: number;
   height: number;
   wallpaper: string;
   backgroundItems?: BackgroundItem[];
+  maskItems?: MaskItem[];
   zoomRegions: ZoomRegion[];
   showShadow: boolean;
   shadowIntensity: number;
@@ -86,6 +443,10 @@ export class FrameRenderer {
   private recordingVideo: HTMLVideoElement | null = null;
   private backgroundImageCache = new Map<string, HTMLImageElement>();
   private backgroundVideoCache = new Map<string, HTMLVideoElement>();
+  private retroGridCanvas: HTMLCanvasElement | null = null;
+  private retroGridGl: WebGLRenderingContext | null = null;
+  private retroGridProgramInfo: RetroGridProgramInfo | null = null;
+  private retroGridPositionBuffer: WebGLBuffer | null = null;
 
   constructor(config: FrameRenderConfig) {
     this.config = config;
@@ -137,6 +498,7 @@ export class FrameRenderer {
     this.clipRenderer = new ClipPixiRenderer(this.app.stage);
     this.clipRenderer.setZIndex(1);
     this.clipRenderer.setAssets(this.config.videoAssets || []);
+    this.clipRenderer.setMaskItems(this.config.maskItems || []);
     this.clipRenderer.syncClips(this.config.videoClips || []);
     this.clipRenderer.setStageSize({ width: this.config.width, height: this.config.height });
     this.recordingClipIds = this.getRecordingClipIds();
@@ -224,6 +586,144 @@ export class FrameRenderer {
     return getAssetPath(source.replace(/^\//, ''));
   }
 
+  private destroyRetroGridRenderer(): void {
+    if (this.retroGridGl) {
+      if (this.retroGridPositionBuffer) {
+        this.retroGridGl.deleteBuffer(this.retroGridPositionBuffer);
+      }
+      if (this.retroGridProgramInfo) {
+        this.retroGridGl.deleteProgram(this.retroGridProgramInfo.program);
+      }
+    }
+
+    this.retroGridPositionBuffer = null;
+    this.retroGridProgramInfo = null;
+    this.retroGridGl = null;
+    this.retroGridCanvas = null;
+  }
+
+  private ensureRetroGridRenderer(width: number, height: number): boolean {
+    if (
+      this.retroGridCanvas &&
+      this.retroGridGl &&
+      this.retroGridProgramInfo &&
+      this.retroGridPositionBuffer &&
+      this.retroGridCanvas.width === width &&
+      this.retroGridCanvas.height === height
+    ) {
+      return true;
+    }
+
+    this.destroyRetroGridRenderer();
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const gl = canvas.getContext('webgl', {
+      alpha: true,
+      antialias: true,
+      premultipliedAlpha: true,
+    });
+
+    if (!gl || !gl.getExtension('OES_standard_derivatives')) {
+      return false;
+    }
+
+    const program = createRetroGridProgram(gl);
+    if (!program) {
+      return false;
+    }
+
+    const programInfo = getRetroGridProgramInfo(gl, program);
+    if (!programInfo) {
+      gl.deleteProgram(program);
+      return false;
+    }
+
+    const positionBuffer = gl.createBuffer();
+    if (!positionBuffer) {
+      gl.deleteProgram(program);
+      return false;
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 3, -1, -1, 3]),
+      gl.STATIC_DRAW,
+    );
+    gl.viewport(0, 0, width, height);
+
+    this.retroGridCanvas = canvas;
+    this.retroGridGl = gl;
+    this.retroGridProgramInfo = programInfo;
+    this.retroGridPositionBuffer = positionBuffer;
+    return true;
+  }
+
+  private drawRetroGridShaderBackground(
+    ctx: CanvasRenderingContext2D,
+    timeMs: number,
+    blurAmount = 0,
+    backdropColor = DEFAULT_BACKGROUND_BACKDROP_COLOR,
+    accentColor = DEFAULT_BACKGROUND_ACCENT_COLOR,
+    angleDeg = DEFAULT_RETRO_GRID_ANGLE,
+    density = DEFAULT_RETRO_GRID_DENSITY,
+  ): boolean {
+    const renderWidth = Math.max(1, Math.round(this.config.previewWidth || this.config.width));
+    const renderHeight = Math.max(1, Math.round(this.config.previewHeight || this.config.height));
+
+    if (!this.ensureRetroGridRenderer(renderWidth, renderHeight)) {
+      return false;
+    }
+
+    const gl = this.retroGridGl;
+    const canvas = this.retroGridCanvas;
+    const programInfo = this.retroGridProgramInfo;
+    const positionBuffer = this.retroGridPositionBuffer;
+
+    if (!gl || !canvas || !programInfo || !positionBuffer) {
+      return false;
+    }
+
+    const viewportWidth = renderWidth;
+    const viewportHeight = renderHeight;
+    const lineColor = resolveRetroGridLineColor(accentColor, 0.72);
+
+    gl.useProgram(programInfo.program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.enableVertexAttribArray(programInfo.attributeLocation);
+    gl.vertexAttribPointer(programInfo.attributeLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1f(programInfo.uniforms.angle, clamp(angleDeg, 1, 89));
+    gl.uniform1f(programInfo.uniforms.cellSize, Math.max(getRetroGridCellSize(density), 1));
+    gl.uniform2f(programInfo.uniforms.containerSize, renderWidth, renderHeight);
+    gl.uniform1f(programInfo.uniforms.devicePixelRatio, 1);
+    gl.uniform4fv(programInfo.uniforms.lineColor, lineColor);
+    gl.uniform1f(programInfo.uniforms.time, timeMs / 1000);
+    gl.uniform2f(programInfo.uniforms.viewportSize, viewportWidth, viewportHeight);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    ctx.save();
+    if (blurAmount > 0) {
+      ctx.filter = `blur(${blurAmount}px)`;
+    }
+    ctx.fillStyle = backdropColor;
+    ctx.fillRect(0, 0, this.config.width, this.config.height);
+    ctx.drawImage(canvas, 0, 0, this.config.width, this.config.height);
+
+    const fadeGradient = ctx.createLinearGradient(0, this.config.height, 0, 0);
+    fadeGradient.addColorStop(0, 'rgba(0,0,0,1)');
+    fadeGradient.addColorStop(0.9, 'rgba(0,0,0,0)');
+    ctx.fillStyle = fadeGradient;
+    ctx.fillRect(0, 0, this.config.width, this.config.height);
+    ctx.restore();
+
+    return true;
+  }
+
   private drawRetroGridBackground(
     ctx: CanvasRenderingContext2D,
     timeMs: number,
@@ -233,13 +733,21 @@ export class FrameRenderer {
     angleDeg = DEFAULT_RETRO_GRID_ANGLE,
     density = DEFAULT_RETRO_GRID_DENSITY,
   ): void {
+    if (this.drawRetroGridShaderBackground(ctx, timeMs, blurAmount, backdropColor, accentColor, angleDeg, density)) {
+      return;
+    }
+
     const width = this.config.width;
     const height = this.config.height;
     const cellSize = getRetroGridCellSize(density);
     const angleFactor = Math.min(1, Math.max(0, (angleDeg - 25) / 60));
     const horizonY = height * (0.48 - angleFactor * 0.18);
     const centerX = width / 2;
-    const travel = ((timeMs / 1000) / 15) % 1;
+    const gridHeight = height * 3;
+    const visibleGridHeight = Math.max(1, height - horizonY);
+    const scrollSpeedPx = (gridHeight * 0.5) / 15;
+    const scrollOffsetPx = ((timeMs / 1000) * scrollSpeedPx) % cellSize;
+    const glowPulse = 0.9 + 0.1 * Math.sin((timeMs / 1000) * Math.PI * 2 * 0.2);
 
     ctx.save();
     if (blurAmount > 0) {
@@ -253,7 +761,7 @@ export class FrameRenderer {
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.55;
     ctx.shadowColor = accentColor;
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = 10 * glowPulse;
 
     const verticalLineCount = Math.max(10, Math.round((width / cellSize) * 0.9));
     const bottomSpread = width * 2.8;
@@ -267,11 +775,12 @@ export class FrameRenderer {
       ctx.stroke();
     }
 
-    const horizontalLineCount = Math.max(12, Math.round(((height - horizonY) / cellSize) * 3.4));
+    const horizontalLineCount = Math.max(12, Math.ceil(gridHeight / cellSize) + 2);
     for (let i = 0; i < horizontalLineCount; i += 1) {
-      const depth = ((i + travel) % horizontalLineCount) / horizontalLineCount;
+      const planeY = i * cellSize + scrollOffsetPx;
+      const depth = Math.max(0, Math.min(1, planeY / gridHeight));
       const eased = depth * depth;
-      const y = horizonY + eased * (height - horizonY);
+      const y = horizonY + eased * visibleGridHeight;
       const halfWidth = eased * width * 2.9;
       ctx.beginPath();
       ctx.moveTo(centerX - halfWidth, y);
@@ -299,7 +808,7 @@ export class FrameRenderer {
     const circleGap = Math.min(width, height) * 0.065;
     const numCircles = rippleCount;
     const animationSeconds = getRippleAnimationDurationSeconds(rippleSpeed);
-    const phase = (timeMs / 1000) / animationSeconds;
+    const elapsedSeconds = timeMs / 1000;
 
     ctx.save();
     if (blurAmount > 0) {
@@ -313,10 +822,14 @@ export class FrameRenderer {
     ctx.shadowBlur = 14;
 
     for (let i = 0; i < numCircles; i += 1) {
-      const pulse = 0.94 + 0.06 * Math.sin((phase - i * 0.12) * Math.PI * 2);
-      const radius = ((baseSize + i * circleGap) * pulse) / 2;
+      const delayedSeconds = elapsedSeconds - i * 0.06;
+      const cycle = ((delayedSeconds / animationSeconds) % 1 + 1) % 1;
+      const eased = 0.5 - 0.5 * Math.cos(cycle * Math.PI * 2);
+      const scale = 1 - 0.1 * eased;
+      const radius = ((baseSize + i * circleGap) * scale) / 2;
       const opacityStep = numCircles > 1 ? 0.18 / (numCircles - 1) : 0;
-      const opacity = Math.max(0.03, 0.24 - i * opacityStep);
+      const baseOpacity = Math.max(0.03, 0.24 - i * opacityStep);
+      const opacity = baseOpacity * (0.85 + (1 - eased) * 0.15);
       ctx.beginPath();
       ctx.lineWidth = 1;
       ctx.globalAlpha = opacity;
@@ -545,6 +1058,7 @@ export class FrameRenderer {
     const retroGridDensity = activeItem?.retroGridDensity ?? DEFAULT_RETRO_GRID_DENSITY;
     const rippleSpeed = activeItem?.rippleSpeed ?? DEFAULT_RIPPLE_SPEED;
     const rippleCount = activeItem?.rippleCount ?? DEFAULT_RIPPLE_COUNT;
+    const presetTimeMs = activeItem ? Math.max(0, timeMs - activeItem.startMs) : timeMs;
 
     if (!source) {
       return;
@@ -567,12 +1081,12 @@ export class FrameRenderer {
       }
 
       if (kind === 'preset' && source === MAGICUI_RETRO_GRID_VALUE) {
-        this.drawRetroGridBackground(bgCtx, timeMs, blurAmount, backdropColor, accentColor, retroGridAngle, retroGridDensity);
+        this.drawRetroGridBackground(bgCtx, presetTimeMs, blurAmount, backdropColor, accentColor, retroGridAngle, retroGridDensity);
         return;
       }
 
       if (kind === 'preset' && source === MAGICUI_RIPPLE_VALUE) {
-        this.drawRippleBackground(bgCtx, timeMs, blurAmount, backdropColor, accentColor, rippleSpeed, rippleCount);
+        this.drawRippleBackground(bgCtx, presetTimeMs, blurAmount, backdropColor, accentColor, rippleSpeed, rippleCount);
         return;
       }
 
@@ -1255,6 +1769,7 @@ export class FrameRenderer {
       video.load();
     });
     this.backgroundVideoCache.clear();
+    this.destroyRetroGridRenderer();
     this.shadowCanvas = null;
     this.shadowCtx = null;
     this.compositeCanvas = null;

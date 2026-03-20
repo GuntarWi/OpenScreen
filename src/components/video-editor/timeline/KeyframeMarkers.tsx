@@ -4,24 +4,29 @@ import { useTimelineContext } from "dnd-timeline";
 interface Keyframe {
   id: string;
   time: number;
+  rawId?: string;
   color?: string;
   title?: string;
   clipId?: string;
-  kind?: 'clipTransform' | 'padding';
+  maskId?: string;
+  pathId?: string;
+  kind: 'clipTransform' | 'maskPath' | 'padding';
 }
 
 interface KeyframeMarkersProps {
   keyframes: Keyframe[];
   selectedKeyframeIds: string[];
-  setSelectedKeyframeIds: React.Dispatch<React.SetStateAction<string[]>>;
-  onSelectKeyframe?: (keyframe: Keyframe) => void;
+  onKeyframePointerDown?: (
+    event: React.PointerEvent,
+    keyframe: Keyframe,
+    mode: "replace" | "toggle",
+  ) => void;
 }
 
 const KeyframeMarkers: React.FC<KeyframeMarkersProps> = ({
   keyframes,
   selectedKeyframeIds,
-  setSelectedKeyframeIds,
-  onSelectKeyframe,
+  onKeyframePointerDown,
 }) => {
   const { sidebarWidth, range, valueToPixels } = useTimelineContext();
   return (
@@ -34,15 +39,10 @@ const KeyframeMarkers: React.FC<KeyframeMarkersProps> = ({
             key={kf.id}
             className={`absolute cursor-pointer ${isSelected ? 'ring-2 ring-[#34B27B]' : ''}`}
             style={{ left: `${sidebarWidth + offset - 8}px`, top: '11px', zIndex: 40 }}
-            onClick={(e) => {
+            onPointerDown={(e) => {
               e.stopPropagation();
-              const shouldToggle = e.metaKey || e.ctrlKey || e.shiftKey;
-              setSelectedKeyframeIds((prev) => (
-                shouldToggle
-                  ? (prev.includes(kf.id) ? prev.filter((id) => id !== kf.id) : [...prev, kf.id])
-                  : [kf.id]
-              ));
-              onSelectKeyframe?.(kf);
+              e.preventDefault();
+              onKeyframePointerDown?.(e, kf, e.metaKey || e.ctrlKey || e.shiftKey ? "toggle" : "replace");
             }}
             title={kf.title ?? `Keyframe @ ${kf.time}ms`}
             data-keyframe-marker="true"

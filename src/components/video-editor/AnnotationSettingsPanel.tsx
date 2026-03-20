@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Trash2, Type, Image as ImageIcon, Upload, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, ChevronDown, Info, Sparkles } from "lucide-react";
@@ -11,7 +11,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { getArrowComponent } from "./ArrowSvgs";
-import { FALLBACK_EMOJIS, loadTelegramEmojis, type TelegramEmoji } from "@/lib/telegramEmojis";
+import { EmojiPickerPanel } from "./EmojiPickerPanel";
+import type { TelegramEmoji } from "@/lib/telegramEmojis";
 
 interface AnnotationSettingsPanelProps {
   annotation: AnnotationRegion;
@@ -71,53 +72,13 @@ export function AnnotationSettingsPanel({
     '#795548', // Brown
   ];
 
-  const [emojiSearch, setEmojiSearch] = useState('');
-  const [emojiResults, setEmojiResults] = useState<TelegramEmoji[]>(FALLBACK_EMOJIS);
-  const [emojiLoading, setEmojiLoading] = useState(false);
-  const [emojiError, setEmojiError] = useState<string | null>(null);
   const [startMs, setStartMs] = useState(annotation.startMs);
   const [endMs, setEndMs] = useState(annotation.endMs);
-
-  useEffect(() => {
-    let active = true;
-    if (annotation.type !== 'emoji') return;
-
-    setEmojiLoading(true);
-    loadTelegramEmojis()
-      .then((results) => {
-        if (!active) return;
-        setEmojiResults(results);
-        setEmojiError(null);
-      })
-      .catch((err) => {
-        if (!active) return;
-        console.error('Failed to load emoji manifest', err);
-        setEmojiError('Unable to load emoji list. Showing cached defaults.');
-      })
-      .finally(() => {
-        if (active) setEmojiLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [annotation.type]);
 
   useEffect(() => {
     setStartMs(annotation.startMs);
     setEndMs(annotation.endMs);
   }, [annotation.startMs, annotation.endMs, annotation.id]);
-
-  const filteredEmojis = useMemo(() => {
-    const query = emojiSearch.toLowerCase().trim();
-    if (!query) return emojiResults;
-    return emojiResults.filter((emoji) =>
-      emoji.name.toLowerCase().includes(query) ||
-      emoji.category.toLowerCase().includes(query)
-    );
-  }, [emojiResults, emojiSearch]);
-
-
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -559,58 +520,11 @@ export function AnnotationSettingsPanel({
               </div>
             )}
 
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={emojiSearch}
-                onChange={(e) => setEmojiSearch(e.target.value)}
-                placeholder="Search Telegram emoji..."
-                className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-slate-200 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[#34B27B] focus:border-transparent"
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-slate-400 hover:text-slate-100 hover:bg-white/5"
-                onClick={() => setEmojiSearch('')}
-              >
-                Clear
-              </Button>
-            </div>
-
-            {emojiError && (
-              <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
-                {emojiError}
-              </div>
-            )}
-
-            <div className="max-h-56 overflow-y-auto rounded-xl border border-white/5 bg-white/5 p-2">
-              {emojiLoading ? (
-                <div className="text-sm text-slate-400 text-center py-6">Loading emoji…</div>
-              ) : filteredEmojis.length > 0 ? (
-                <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
-                  {filteredEmojis.map((emoji) => {
-                    const isActive = annotation.content === emoji.src;
-                    return (
-                      <button
-                        key={`${emoji.category}-${emoji.name}`}
-                        onClick={() => handleEmojiSelect(emoji)}
-                        className={cn(
-                          "group flex flex-col items-center gap-1 p-2 rounded-lg border text-[11px] text-slate-300 hover:bg-white/10 hover:border-white/20 transition",
-                          isActive && "border-[#34B27B] bg-[#34B27B]/10 text-white"
-                        )}
-                      >
-                        <div className="w-10 h-10 rounded-md bg-black/30 flex items-center justify-center overflow-hidden border border-white/5">
-                          <img src={emoji.src} alt={emoji.name} className="w-full h-full object-contain" loading="lazy" />
-                        </div>
-                        <span className="w-full text-center truncate">{emoji.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-sm text-slate-400 text-center py-4">No emoji found</div>
-              )}
-            </div>
+            <EmojiPickerPanel
+              selectedSrc={annotation.content}
+              onSelect={handleEmojiSelect}
+              searchPlaceholder="Search Telegram emoji..."
+            />
 
             <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2">
               <div className="flex items-center justify-between gap-2">

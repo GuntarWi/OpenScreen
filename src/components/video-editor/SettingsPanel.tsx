@@ -13,11 +13,13 @@ import { Trash2, Download, Crop, X, Bug, Upload, Star } from "lucide-react";
 import { toast } from "sonner";
 import { BezierCurveEditor } from "./BezierCurveEditor";
 import { RECORDING_ASSET_ID } from "./types";
-import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion, SpeedRegion, ScreenOffset, VideoAsset, VideoClip, AudioClip, VideoClipFit, VideoClipEffect, PaddingKeyframe, TimelineTrack, ZoomRegion, TrimRegion, BackgroundItem, BackgroundFit, ClipTransformBezier } from "./types";
+import type { ZoomDepth, CropRegion, AnnotationRegion, AnnotationType, CursorTrack, CursorStyle, CursorSmoothing, End2EndParams, ZoomFollowMode, EffectRegion, SpeedRegion, ScreenOffset, VideoAsset, VideoClip, AudioClip, VideoClipFit, VideoClipEffect, PaddingKeyframe, TimelineTrack, ZoomRegion, TrimRegion, BackgroundItem, BackgroundFit, ClipTransformBezier, MaskItem } from "./types";
 import { CropControl } from "./CropControl";
 import { KeyboardShortcutsHelp } from "./KeyboardShortcutsHelp";
 import { AnnotationSettingsPanel } from "./AnnotationSettingsPanel";
+import { EmojiPickerPanel } from "./EmojiPickerPanel";
 import { EffectSettingsPanel } from "./EffectSettingsPanel";
+import { MaskSettingsPanel } from "./MaskSettingsPanel";
 import { SpeedSettingsPanel } from "./SpeedSettingsPanel";
 import { getAspectRatioValue, type AspectRatio } from "@/utils/aspectRatioUtils";
 import type { ExportQuality } from "@/lib/exporter";
@@ -109,11 +111,14 @@ interface SettingsPanelProps {
   onTrackDelete?: (trackId: string) => void;
   onAddItemToTrack?: (trackId: string) => void;
   videoClips?: VideoClip[];
+  maskItems?: MaskItem[];
   audioClips?: AudioClip[];
   backgroundItems?: BackgroundItem[];
   zoomRegions?: ZoomRegion[];
   trimRegions?: TrimRegion[];
   selectedBackgroundId?: string | null;
+  onSelectBackground?: (id: string | null) => void;
+  selectedMaskId?: string | null;
   selectedClipId?: string | null;
   onVideoAssetAdd?: () => void;
   onVideoAssetRemove?: (id: string) => void;
@@ -130,6 +135,13 @@ interface SettingsPanelProps {
   onClipTransformKeyframeCurveChange?: (id: string, keyframeId: string, curveToNext: ClipTransformBezier) => void;
   onClipTransformKeyframesClear?: (id: string) => void;
   onClipRectChange?: (id: string, rect: InteractionRect) => void;
+  onMaskChange?: (id: string, patch: Partial<MaskItem>) => void;
+  onMaskDelete?: (id: string) => void;
+  onMaskAdd?: (targetClipId?: string, shape?: MaskItem['shape']) => void;
+  onMaskPathKeyframeAddOrUpdate?: (id: string) => void;
+  onMaskPathKeyframeDelete?: (id: string, keyframeId: string) => void;
+  onMaskPathKeyframeCurveChange?: (id: string, keyframeId: string, curveToNext: ClipTransformBezier) => void;
+  onMaskPathKeyframesClear?: (id: string) => void;
   cropRegion?: CropRegion;
   onCropChange?: (region: CropRegion) => void;
   aspectRatio: AspectRatio;
@@ -145,6 +157,7 @@ interface SettingsPanelProps {
   onAnnotationTimingChange?: (id: string, startMs: number, endMs: number) => void;
   onAnnotationEffectChange?: (id: string, patch: Partial<AnnotationRegion>) => void;
   onAnnotationEmojiChange?: (id: string, emoji: { src: string; alt?: string; category?: string }) => void;
+  onAnnotationEmojiAdd?: (emoji: { src: string; alt?: string; category?: string }) => void;
   onAnnotationLayerChange?: (id: string, layer: AnnotationRegion['layer']) => void;
   onAnnotationFigureDataChange?: (id: string, figureData: any) => void;
   onAnnotationDelete?: (id: string) => void;
@@ -187,26 +200,26 @@ const ZOOM_DEPTH_OPTIONS: Array<{ depth: ZoomDepth; label: string }> = [
   { depth: 6, label: "5×" },
 ];
 
-export function SettingsPanel({ 
-  selected, 
-  onWallpaperChange, 
-  selectedZoomDepth, 
-  onZoomDepthChange, 
-  selectedZoomId, 
-  onZoomDelete, 
+export function SettingsPanel({
+  selected,
+  onWallpaperChange,
+  selectedZoomDepth,
+  onZoomDepthChange,
+  selectedZoomId,
+  onZoomDelete,
   selectedTrimId,
   onTrimDelete,
-  shadowIntensity = 0, 
-  onShadowChange, 
-  showBlur, 
-  onBlurChange, 
+  shadowIntensity = 0,
+  onShadowChange,
+  showBlur,
+  onBlurChange,
   showSafeFrameOverlay = false,
   onShowSafeFrameOverlayChange,
-  motionBlurEnabled = true, 
-  onMotionBlurChange, 
-  borderRadius = 0, 
-  onBorderRadiusChange, 
-  padding = 50, 
+  motionBlurEnabled = true,
+  onMotionBlurChange,
+  borderRadius = 0,
+  onBorderRadiusChange,
+  padding = 50,
   onPaddingChange,
   paddingKeyframes = [],
   onPaddingKeyframesChange,
@@ -221,11 +234,14 @@ export function SettingsPanel({
   onTrackDelete,
   onAddItemToTrack,
   videoClips = [],
+  maskItems = [],
   audioClips = [],
   backgroundItems = [],
   zoomRegions = [],
   trimRegions = [],
   selectedBackgroundId,
+  onSelectBackground,
+  selectedMaskId,
   selectedClipId,
   onVideoAssetAdd,
   onVideoAssetRemove,
@@ -242,10 +258,17 @@ export function SettingsPanel({
   onClipTransformKeyframeCurveChange,
   onClipTransformKeyframesClear,
   onClipRectChange,
+  onMaskChange,
+  onMaskDelete,
+  onMaskAdd,
+  onMaskPathKeyframeAddOrUpdate,
+  onMaskPathKeyframeDelete,
+  onMaskPathKeyframeCurveChange,
+  onMaskPathKeyframesClear,
   cropRegion,
-  onCropChange, 
-  aspectRatio, 
-  videoElement, 
+  onCropChange,
+  aspectRatio,
+  videoElement,
   exportQuality = 'good',
   onExportQualityChange,
   onExport,
@@ -257,6 +280,7 @@ export function SettingsPanel({
   onAnnotationTimingChange,
   onAnnotationEffectChange,
   onAnnotationEmojiChange,
+  onAnnotationEmojiAdd,
   onAnnotationLayerChange,
   onAnnotationFigureDataChange,
   onAnnotationDelete,
@@ -308,10 +332,11 @@ export function SettingsPanel({
     '#9B59B6', '#E91E63', '#00BCD4', '#FF5722', '#8BC34A', '#FFC107',
     '#34B27B', '#000000', '#607D8B', '#795548',
   ];
-  
+
   const [selectedColor, setSelectedColor] = useState('#ADADAD');
   const [gradient, setGradient] = useState<string>(GRADIENTS[0]);
-  const [activeTab, setActiveTab] = useState<'screen' | 'media' | 'clips' | 'export'>('screen');
+  const [activeTab, setActiveTab] = useState<'screen' | 'background' | 'media' | 'emoji' | 'clips' | 'export'>('screen');
+  const topLevelTabClassName = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1.5 py-1 text-[10px] leading-none tracking-tight data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 rounded-lg transition-all";
 
   const mediaAssets = useMemo(
     () => videoAssets.filter((asset) => asset.id !== RECORDING_ASSET_ID),
@@ -341,6 +366,13 @@ export function SettingsPanel({
   const selectedBackground = selectedBackgroundId
     ? backgroundItems.find((item) => item.id === selectedBackgroundId) ?? null
     : null;
+  const selectedMask = selectedMaskId
+    ? maskItems.find((item) => item.id === selectedMaskId) ?? null
+    : null;
+  const sortedBackgroundItems = useMemo(
+    () => [...backgroundItems].sort((a, b) => a.startMs - b.startMs),
+    [backgroundItems],
+  );
   const activeBackgroundAtPlayhead = useMemo(
     () => resolveActiveBackgroundItem(backgroundItems, Math.round((currentTime ?? 0) * 1000)),
     [backgroundItems, currentTime],
@@ -476,7 +508,7 @@ export function SettingsPanel({
 
   useEffect(() => {
     if (selectedBackground) {
-      setActiveTab('screen');
+      setActiveTab('background');
     }
   }, [selectedBackground]);
   // Local follow state to allow toggling even if parent doesn't pass handler
@@ -494,7 +526,7 @@ export function SettingsPanel({
   const zoomEnabled = Boolean(selectedZoomDepth);
   const trimEnabled = Boolean(selectedTrimId);
   const cursorEnabled = Boolean(selectedCursorId && cursorTrack && cursorTrack.events.length > 0);
-  
+
   const handleDeleteClick = () => {
     if (selectedZoomId && onZoomDelete) {
       onZoomDelete(selectedZoomId);
@@ -512,7 +544,7 @@ export function SettingsPanel({
     if (!files || files.length === 0) return;
 
     const file = files[0];
-    
+
     // Validate file type - only allow JPG/JPEG
     const validTypes = ['image/jpeg', 'image/jpg'];
     if (!validTypes.includes(file.type)) {
@@ -554,207 +586,9 @@ export function SettingsPanel({
     }
   };
 
-  // Find selected annotation
-  const selectedAnnotation = selectedAnnotationId 
-    ? annotationRegions.find(a => a.id === selectedAnnotationId)
-    : null;
-  const selectedEffect = selectedEffectId
-    ? effectRegions.find(effect => effect.id === selectedEffectId)
-    : null;
-  // If an annotation is selected, show annotation settings instead
-  if (selectedAnnotation && onAnnotationContentChange && onAnnotationTypeChange && onAnnotationStyleChange && onAnnotationDelete) {
-    return (
-      <AnnotationSettingsPanel
-        annotation={selectedAnnotation}
-        onContentChange={(content) => onAnnotationContentChange(selectedAnnotation.id, content)}
-        onTypeChange={(type) => onAnnotationTypeChange(selectedAnnotation.id, type)}
-        onStyleChange={(style) => onAnnotationStyleChange(selectedAnnotation.id, style)}
-        onTimingChange={
-          onAnnotationTimingChange
-            ? (startMs, endMs) => onAnnotationTimingChange(selectedAnnotation.id, startMs, endMs)
-            : undefined
-        }
-        onEffectChange={
-          onAnnotationEffectChange
-            ? (patch) => onAnnotationEffectChange(selectedAnnotation.id, patch)
-            : undefined
-        }
-        onEmojiChange={onAnnotationEmojiChange ? (emoji) => onAnnotationEmojiChange(selectedAnnotation.id, emoji) : undefined}
-        onLayerChange={onAnnotationLayerChange ? (layer) => onAnnotationLayerChange(selectedAnnotation.id, layer) : undefined}
-        onFigureDataChange={onAnnotationFigureDataChange ? (figureData) => onAnnotationFigureDataChange(selectedAnnotation.id, figureData) : undefined}
-        onDelete={() => onAnnotationDelete(selectedAnnotation.id)}
-      />
-    );
-  }
-
-  if (selectedEffect && onEffectChange && onEffectDelete) {
-    return (
-      <EffectSettingsPanel
-        effect={selectedEffect}
-        onChange={(patch) => onEffectChange(selectedEffect.id, patch)}
-        onDelete={() => onEffectDelete(selectedEffect.id)}
-      />
-    );
-  }
-
-  const selectedSpeedRegion = selectedSpeedId
-    ? speedRegions.find((r) => r.id === selectedSpeedId)
-    : null;
-
-  if (selectedSpeedRegion && onSpeedChange && onSpeedDelete) {
-    return (
-      <SpeedSettingsPanel
-        region={selectedSpeedRegion}
-        onChange={(patch) => onSpeedChange(selectedSpeedRegion.id, patch)}
-        onDelete={() => onSpeedDelete(selectedSpeedRegion.id)}
-      />
-    );
-  }
-
-  if (selectedTrack) {
-    const trackItemCount =
-      videoClips.filter((clip) => clip.trackId === selectedTrack.id).length +
-      audioClips.filter((clip) => clip.trackId === selectedTrack.id).length +
-      backgroundItems.filter((item) => item.trackId === selectedTrack.id).length +
-      zoomRegions.filter((region) => region.trackId === selectedTrack.id).length +
-      trimRegions.filter((region) => region.trackId === selectedTrack.id).length +
-      annotationRegions.filter((annotation) => annotation.trackId === selectedTrack.id).length +
-      effectRegions.filter((effect) => effect.trackId === selectedTrack.id).length +
-      speedRegions.filter((region) => region.trackId === selectedTrack.id).length +
-      (cursorTrack?.trackId === selectedTrack.id ? 1 : 0);
-    const canAddItem = ['zoom', 'trim', 'effect', 'annotation', 'speed'].includes(selectedTrack.itemType);
-    const canMuteTrack = selectedTrack.type !== 'recording' && selectedTrack.type !== 'background';
-    const trackTypeLabel = selectedTrack.type === 'generic'
-      ? 'Universal'
-      : selectedTrack.type.charAt(0).toUpperCase() + selectedTrack.type.slice(1);
-    const addLabel = (() => {
-      switch (selectedTrack.itemType) {
-        case 'zoom':
-          return 'Add Zoom';
-        case 'trim':
-          return 'Add Trim';
-        case 'effect':
-          return 'Add Effect';
-        case 'annotation':
-          return 'Add Annotation';
-        case 'speed':
-          return 'Add Speed Region';
-        default:
-          return 'Add Item';
-      }
-    })();
-
-    return (
-      <div className="flex-[2] min-w-0 bg-[#09090b] border border-white/5 rounded-2xl p-4 flex flex-col shadow-xl h-full overflow-y-auto custom-scrollbar">
-        <div className="mb-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-slate-100">Track Settings</div>
-              <div className="text-xs text-slate-500 mt-1 uppercase tracking-[0.18em]">{trackTypeLabel}</div>
-            </div>
-            <div className="text-[10px] font-medium px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300">
-              {trackItemCount} items
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
-            <div className="text-xs font-medium text-slate-200">Track Name</div>
-            <input
-              type="text"
-              value={selectedTrack.name}
-              onChange={(event) => onTrackNameChange?.(selectedTrack.id, event.target.value)}
-              className="w-full p-2 rounded bg-black/20 text-slate-200 border border-white/10"
-              placeholder="Track name"
-            />
-          </div>
-
-          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium text-slate-200">Track Height</div>
-              <span className="text-[10px] text-slate-400 font-mono">{Math.round(selectedTrack.height)}px</span>
-            </div>
-            <Slider
-              value={[selectedTrack.height]}
-              onValueChange={(values) => onTrackHeightChange?.(selectedTrack.id, values[0])}
-              min={36}
-              max={160}
-              step={1}
-              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
-            />
-          </div>
-
-          <div className={cn("grid gap-3", canMuteTrack ? "grid-cols-2" : "grid-cols-1")}>
-            <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-              <div className="text-xs font-medium text-slate-200">Hide Track</div>
-              <Switch
-                checked={Boolean(selectedTrack.hidden)}
-                onCheckedChange={(value) => onTrackHiddenChange?.(selectedTrack.id, Boolean(value))}
-                className="data-[state=checked]:bg-[#34B27B]"
-              />
-            </div>
-            {canMuteTrack ? (
-              <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-                <div className="text-xs font-medium text-slate-200">Mute Track Audio</div>
-                <Switch
-                  checked={Boolean(selectedTrack.muted)}
-                  onCheckedChange={(value) => onTrackMuteChange?.(selectedTrack.id, Boolean(value))}
-                  className="data-[state=checked]:bg-[#34B27B]"
-                />
-              </div>
-            ) : null}
-          </div>
-
-          {selectedTrack.type === 'generic' ? (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100/90">
-              Universal tracks accept clips, audio, effects, speed, trim, zoom, annotation, and cursor items on the same row.
-            </div>
-          ) : null}
-
-          {canAddItem ? (
-            <Button
-              onClick={() => onAddItemToTrack?.(selectedTrack.id)}
-              className="w-full gap-2 bg-[#34B27B] text-white hover:bg-[#2da06d]"
-            >
-              <Star className="w-4 h-4" />
-              {addLabel}
-            </Button>
-          ) : null}
-
-          <Button
-            onClick={() => onTrackDelete?.(selectedTrack.id)}
-            variant="destructive"
-            disabled={selectedTrack.type === 'recording' || selectedTrack.type === 'background'}
-            className="w-full gap-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/30 disabled:opacity-40"
-          >
-            <Trash2 className="w-4 h-4" />
-            Delete Track
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-[2] min-w-0 bg-[#09090b] border border-white/5 rounded-2xl p-4 flex flex-col shadow-xl h-full overflow-y-auto custom-scrollbar">
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'screen' | 'media' | 'clips' | 'export')} className="flex-1 flex flex-col min-h-0">
-        <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-4 h-auto rounded-xl">
-          <TabsTrigger value="screen" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
-            Screen
-          </TabsTrigger>
-          <TabsTrigger value="media" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
-            Media
-          </TabsTrigger>
-          <TabsTrigger value="clips" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
-            Clips
-          </TabsTrigger>
-          <TabsTrigger value="export" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">
-            Export
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="screen" className="mt-0 space-y-4">
-      {inspectedBackground && (
+  const renderBackgroundSegmentInspector = () => (
+    <>
+      {inspectedBackground ? (
         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-3 text-[11px] text-emerald-100/90 space-y-2">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -777,26 +611,26 @@ export function SettingsPanel({
             ) : null}
           </div>
           <div>
-            Changes in this tab apply to the selected background segment. If no segment is selected, changes apply at the playhead.
+            Changes below apply to the selected background segment. If none is selected, they apply to the segment under the playhead.
           </div>
         </div>
-      )}
+      ) : null}
       {inspectedBackground && onBackgroundChange ? (
         <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-xs font-medium text-slate-200">Background Segment</div>
-              <div className="text-[10px] text-slate-500">
-                {inspectedBackground.kind === 'video'
-                  ? 'Video'
-                  : inspectedBackground.kind === 'image'
-                    ? 'Image'
-                    : inspectedBackground.kind === 'gradient'
-                      ? 'Gradient'
-                      : inspectedBackground.kind === 'preset'
-                        ? 'Preset'
-                        : 'Color'}
-              </div>
+            <div className="text-[10px] text-slate-500">
+              {inspectedBackground.kind === 'video'
+                ? 'Video'
+                : inspectedBackground.kind === 'image'
+                  ? 'Image'
+                  : inspectedBackground.kind === 'gradient'
+                    ? 'Gradient'
+                    : inspectedBackground.kind === 'preset'
+                      ? 'Preset'
+                      : 'Color'}
             </div>
+          </div>
           {(inspectedBackground.kind === 'image' || inspectedBackground.kind === 'video') ? (
             <div>
               <div className="text-[11px] text-slate-400 mb-1">Fit</div>
@@ -938,6 +772,504 @@ export function SettingsPanel({
               className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
             />
           </div>
+        </div>
+      ) : null}
+    </>
+  );
+
+  const renderBackgroundSourcePicker = () => (
+    <Tabs defaultValue="image" className="flex-1 flex flex-col min-h-0">
+      <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-4 h-auto rounded-xl">
+        <TabsTrigger value="image" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Image</TabsTrigger>
+        <TabsTrigger value="color" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Color</TabsTrigger>
+        <TabsTrigger value="gradient" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Gradient</TabsTrigger>
+        <TabsTrigger value="magic" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Magic</TabsTrigger>
+      </TabsList>
+
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2">
+        <TabsContent value="image" className="mt-0 space-y-3 px-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageUpload}
+            accept=".jpg,.jpeg,image/jpeg"
+            className="hidden"
+          />
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            variant="outline"
+            className="w-full gap-2 bg-white/5 text-slate-200 border-white/10 hover:bg-[#34B27B] hover:text-white hover:border-[#34B27B] transition-all"
+          >
+            <Upload className="w-4 h-4" />
+            Upload Custom Image
+          </Button>
+
+          <div className="grid grid-cols-6 gap-2.5">
+            {customImages.map((imageUrl, idx) => {
+              const isSelected = selected === imageUrl;
+              return (
+                <div
+                  key={`custom-${idx}`}
+                  className={cn(
+                    "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 relative group shadow-sm",
+                    isSelected
+                      ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10"
+                      : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
+                  )}
+                  style={{ backgroundImage: `url(${imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }}
+                  aria-label={`Custom Image ${idx + 1}`}
+                  onClick={() => onWallpaperChange(imageUrl)}
+                  role="button"
+                >
+                  <button
+                    onClick={(e) => handleRemoveCustomImage(imageUrl, e)}
+                    className="absolute top-1 right-1 w-4 h-4 bg-red-500/90 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                    aria-label="Remove custom image"
+                  >
+                    <X className="w-2.5 h-2.5 text-white" />
+                  </button>
+                </div>
+              );
+            })}
+
+            {(wallpaperPaths.length > 0 ? wallpaperPaths : WALLPAPER_RELATIVE.map(p => `/${p}`)).map((path, idx) => {
+              const isSelected = (() => {
+                if (!selected) return false;
+                if (selected === path) return true;
+                try {
+                  const clean = (s: string) => s.replace(/^file:\/\//, '').replace(/^\//, '');
+                  if (clean(selected).endsWith(clean(path))) return true;
+                  if (clean(path).endsWith(clean(selected))) return true;
+                } catch {}
+                return false;
+              })();
+              return (
+                <div
+                  key={path}
+                  className={cn(
+                    "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 shadow-sm",
+                    isSelected
+                      ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10"
+                      : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
+                  )}
+                  style={{ backgroundImage: `url(${path})`, backgroundSize: "cover", backgroundPosition: "center" }}
+                  aria-label={`Wallpaper ${idx + 1}`}
+                  onClick={() => onWallpaperChange(path)}
+                  role="button"
+                />
+              );
+            })}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="color" className="mt-0 px-2">
+          <div className="p-1">
+            <Block
+              color={selectedColor}
+              colors={colorPalette}
+              onChange={(color) => {
+                setSelectedColor(color.hex);
+                onWallpaperChange(color.hex);
+              }}
+              style={{
+                width: '100%',
+                borderRadius: '12px',
+              }}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="gradient" className="mt-0 px-2">
+          <div className="grid grid-cols-6 gap-2.5">
+            {GRADIENTS.map((g, idx) => (
+              <div
+                key={g}
+                className={cn(
+                  "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 shadow-sm",
+                  gradient === g
+                    ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10"
+                    : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
+                )}
+                style={{ background: g }}
+                aria-label={`Gradient ${idx + 1}`}
+                onClick={() => { setGradient(g); onWallpaperChange(g); }}
+                role="button"
+              />
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="magic" className="mt-0 px-2">
+          <div className="grid gap-3">
+            <button
+              type="button"
+              className={cn(
+                "relative h-28 overflow-hidden rounded-xl border-2 text-left transition-all",
+                selected === MAGICUI_RETRO_GRID_VALUE
+                  ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 shadow-lg shadow-[#34B27B]/10"
+                  : "border-white/10 hover:border-[#34B27B]/40 bg-white/5"
+              )}
+              onClick={() => onWallpaperChange(MAGICUI_RETRO_GRID_VALUE)}
+            >
+              <div
+                className="absolute inset-0"
+                style={{ backgroundColor: selectedMagicBackdropColor }}
+              />
+              <RetroGrid
+                className="opacity-80"
+                angle={selectedRetroGridAngle}
+                cellSize={Math.max(18, getRetroGridCellSize(selectedRetroGridDensity) - 4)}
+                opacity={0.7}
+                lightLineColor={selectedMagicAccentColor}
+                darkLineColor={selectedMagicAccentColor}
+              />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent px-3 py-2">
+                <div className="text-xs font-medium text-slate-100">Retro Grid</div>
+                <div className="text-[10px] text-slate-400">MagicUI preset background</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "relative h-28 overflow-hidden rounded-xl border-2 text-left transition-all",
+                selected === MAGICUI_RIPPLE_VALUE
+                  ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 shadow-lg shadow-[#34B27B]/10"
+                  : "border-white/10 hover:border-[#34B27B]/40 bg-white/5"
+              )}
+              onClick={() => onWallpaperChange(MAGICUI_RIPPLE_VALUE)}
+            >
+              <div
+                className="absolute inset-0"
+                style={{ backgroundColor: selectedMagicBackdropColor }}
+              />
+              <Ripple
+                className="opacity-80 [mask-image:none]"
+                mainCircleSize={120}
+                mainCircleOpacity={0.22}
+                numCircles={selectedRippleCount}
+                animationDurationSeconds={getRippleAnimationDurationSeconds(selectedRippleSpeed)}
+                style={{ color: selectedMagicAccentColor }}
+              />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent px-3 py-2">
+                <div className="text-xs font-medium text-slate-100">Ripple</div>
+                <div className="text-[10px] text-slate-400">MagicUI preset background</div>
+              </div>
+            </button>
+          </div>
+        </TabsContent>
+      </div>
+    </Tabs>
+  );
+
+  const renderBackgroundTimelineList = () => (
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium text-slate-200">Timeline Backgrounds</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-400 font-mono">{sortedBackgroundItems.length} segments</span>
+          {selectedBackgroundId && onSelectBackground ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[10px] text-slate-300 hover:bg-white/10 hover:text-white"
+              onClick={() => onSelectBackground(null)}
+            >
+              New Segment
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {sortedBackgroundItems.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-white/10 px-3 py-5 text-center text-[11px] text-slate-500">
+          No background segments yet. Pick a background below to create one at the playhead.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {sortedBackgroundItems.map((item, index) => {
+            const isSelected = item.id === selectedBackgroundId;
+            const isActive = item.id === activeBackgroundAtPlayhead?.id;
+            const kindLabel = item.kind === 'video'
+              ? 'Video'
+              : item.kind === 'image'
+                ? 'Image'
+                : item.kind === 'gradient'
+                  ? 'Gradient'
+                  : item.kind === 'preset'
+                    ? 'Preset'
+                    : 'Color';
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  "w-full rounded-lg border px-3 py-2 text-left transition-all",
+                  isSelected
+                    ? "border-[#34B27B] bg-[#34B27B]/10"
+                    : "border-white/10 bg-black/20 hover:border-white/20 hover:bg-white/[0.04]"
+                )}
+                onClick={() => onSelectBackground?.(item.id)}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-slate-200">
+                      Background {index + 1}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {kindLabel} • {Math.max(0, item.startMs / 1000).toFixed(1)}s to {Math.max(0, item.endMs / 1000).toFixed(1)}s
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {isActive ? (
+                      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-emerald-200">
+                        Active
+                      </span>
+                    ) : null}
+                    {isSelected ? (
+                      <span className="rounded-full bg-[#34B27B]/15 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-[#7ce2b8]">
+                        Selected
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  // Find selected annotation
+  const selectedAnnotation = selectedAnnotationId
+    ? annotationRegions.find(a => a.id === selectedAnnotationId)
+    : null;
+  const selectedEffect = selectedEffectId
+    ? effectRegions.find(effect => effect.id === selectedEffectId)
+    : null;
+  // If an annotation is selected, show annotation settings instead
+  if (selectedAnnotation && onAnnotationContentChange && onAnnotationTypeChange && onAnnotationStyleChange && onAnnotationDelete) {
+    return (
+      <AnnotationSettingsPanel
+        annotation={selectedAnnotation}
+        onContentChange={(content) => onAnnotationContentChange(selectedAnnotation.id, content)}
+        onTypeChange={(type) => onAnnotationTypeChange(selectedAnnotation.id, type)}
+        onStyleChange={(style) => onAnnotationStyleChange(selectedAnnotation.id, style)}
+        onTimingChange={
+          onAnnotationTimingChange
+            ? (startMs, endMs) => onAnnotationTimingChange(selectedAnnotation.id, startMs, endMs)
+            : undefined
+        }
+        onEffectChange={
+          onAnnotationEffectChange
+            ? (patch) => onAnnotationEffectChange(selectedAnnotation.id, patch)
+            : undefined
+        }
+        onEmojiChange={onAnnotationEmojiChange ? (emoji) => onAnnotationEmojiChange(selectedAnnotation.id, emoji) : undefined}
+        onLayerChange={onAnnotationLayerChange ? (layer) => onAnnotationLayerChange(selectedAnnotation.id, layer) : undefined}
+        onFigureDataChange={onAnnotationFigureDataChange ? (figureData) => onAnnotationFigureDataChange(selectedAnnotation.id, figureData) : undefined}
+        onDelete={() => onAnnotationDelete(selectedAnnotation.id)}
+      />
+    );
+  }
+
+  if (selectedEffect && onEffectChange && onEffectDelete) {
+    return (
+      <EffectSettingsPanel
+        effect={selectedEffect}
+        onChange={(patch) => onEffectChange(selectedEffect.id, patch)}
+        onDelete={() => onEffectDelete(selectedEffect.id)}
+      />
+    );
+  }
+
+  if (selectedMask && onMaskChange && onMaskDelete) {
+    return (
+      <MaskSettingsPanel
+        mask={selectedMask}
+        videoClips={videoClips}
+        videoAssets={videoAssets}
+        currentTimeMs={Math.round(currentTime * 1000)}
+        onChange={(patch) => onMaskChange(selectedMask.id, patch)}
+        onDelete={() => onMaskDelete(selectedMask.id)}
+        onKeyframeAddOrUpdate={onMaskPathKeyframeAddOrUpdate ? () => onMaskPathKeyframeAddOrUpdate(selectedMask.id) : undefined}
+        onKeyframeDelete={onMaskPathKeyframeDelete ? (keyframeId) => onMaskPathKeyframeDelete(selectedMask.id, keyframeId) : undefined}
+        onKeyframeCurveChange={onMaskPathKeyframeCurveChange ? (keyframeId, curve) => onMaskPathKeyframeCurveChange(selectedMask.id, keyframeId, curve) : undefined}
+        onKeyframesClear={onMaskPathKeyframesClear ? () => onMaskPathKeyframesClear(selectedMask.id) : undefined}
+      />
+    );
+  }
+
+  const selectedSpeedRegion = selectedSpeedId
+    ? speedRegions.find((r) => r.id === selectedSpeedId)
+    : null;
+
+  if (selectedSpeedRegion && onSpeedChange && onSpeedDelete) {
+    return (
+      <SpeedSettingsPanel
+        region={selectedSpeedRegion}
+        onChange={(patch) => onSpeedChange(selectedSpeedRegion.id, patch)}
+        onDelete={() => onSpeedDelete(selectedSpeedRegion.id)}
+      />
+    );
+  }
+
+  if (selectedTrack) {
+    const trackItemCount =
+      videoClips.filter((clip) => clip.trackId === selectedTrack.id).length +
+      maskItems.filter((item) => item.trackId === selectedTrack.id).length +
+      audioClips.filter((clip) => clip.trackId === selectedTrack.id).length +
+      backgroundItems.filter((item) => item.trackId === selectedTrack.id).length +
+      zoomRegions.filter((region) => region.trackId === selectedTrack.id).length +
+      trimRegions.filter((region) => region.trackId === selectedTrack.id).length +
+      annotationRegions.filter((annotation) => annotation.trackId === selectedTrack.id).length +
+      effectRegions.filter((effect) => effect.trackId === selectedTrack.id).length +
+      speedRegions.filter((region) => region.trackId === selectedTrack.id).length +
+      (cursorTrack?.trackId === selectedTrack.id ? 1 : 0);
+    const canAddItem = ['zoom', 'trim', 'effect', 'annotation', 'speed', 'mask'].includes(selectedTrack.itemType);
+    const canMuteTrack = selectedTrack.type !== 'recording' && selectedTrack.type !== 'background' && selectedTrack.type !== 'mask';
+    const trackTypeLabel = selectedTrack.type === 'generic'
+      ? 'Universal'
+      : selectedTrack.type.charAt(0).toUpperCase() + selectedTrack.type.slice(1);
+    const addLabel = (() => {
+      switch (selectedTrack.itemType) {
+        case 'zoom':
+          return 'Add Zoom';
+        case 'trim':
+          return 'Add Trim';
+        case 'effect':
+          return 'Add Effect';
+        case 'annotation':
+          return 'Add Annotation';
+        case 'mask':
+          return 'Add Mask';
+        case 'speed':
+          return 'Add Speed Region';
+        default:
+          return 'Add Item';
+      }
+    })();
+
+    return (
+      <div className="flex-[2] min-w-0 bg-[#09090b] border border-white/5 rounded-2xl p-4 flex flex-col shadow-xl h-full overflow-y-auto custom-scrollbar">
+        <div className="mb-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-100">Track Settings</div>
+              <div className="text-xs text-slate-500 mt-1 uppercase tracking-[0.18em]">{trackTypeLabel}</div>
+            </div>
+            <div className="text-[10px] font-medium px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300">
+              {trackItemCount} items
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+            <div className="text-xs font-medium text-slate-200">Track Name</div>
+            <input
+              type="text"
+              value={selectedTrack.name}
+              onChange={(event) => onTrackNameChange?.(selectedTrack.id, event.target.value)}
+              className="w-full p-2 rounded bg-black/20 text-slate-200 border border-white/10"
+              placeholder="Track name"
+            />
+          </div>
+
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-slate-200">Track Height</div>
+              <span className="text-[10px] text-slate-400 font-mono">{Math.round(selectedTrack.height)}px</span>
+            </div>
+            <Slider
+              value={[selectedTrack.height]}
+              onValueChange={(values) => onTrackHeightChange?.(selectedTrack.id, values[0])}
+              min={36}
+              max={160}
+              step={1}
+              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+            />
+          </div>
+
+          <div className={cn("grid gap-3", canMuteTrack ? "grid-cols-2" : "grid-cols-1")}>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+              <div className="text-xs font-medium text-slate-200">Hide Track</div>
+              <Switch
+                checked={Boolean(selectedTrack.hidden)}
+                onCheckedChange={(value) => onTrackHiddenChange?.(selectedTrack.id, Boolean(value))}
+                className="data-[state=checked]:bg-[#34B27B]"
+              />
+            </div>
+            {canMuteTrack ? (
+              <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                <div className="text-xs font-medium text-slate-200">Mute Track Audio</div>
+                <Switch
+                  checked={Boolean(selectedTrack.muted)}
+                  onCheckedChange={(value) => onTrackMuteChange?.(selectedTrack.id, Boolean(value))}
+                  className="data-[state=checked]:bg-[#34B27B]"
+                />
+              </div>
+            ) : null}
+          </div>
+
+          {selectedTrack.type === 'generic' ? (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100/90">
+              Universal tracks accept clips, masks, audio, effects, speed, trim, zoom, annotation, and cursor items on the same row.
+            </div>
+          ) : null}
+
+          {canAddItem ? (
+            <Button
+              onClick={() => onAddItemToTrack?.(selectedTrack.id)}
+              className="w-full gap-2 bg-[#34B27B] text-white hover:bg-[#2da06d]"
+            >
+              <Star className="w-4 h-4" />
+              {addLabel}
+            </Button>
+          ) : null}
+
+          <Button
+            onClick={() => onTrackDelete?.(selectedTrack.id)}
+            variant="destructive"
+            disabled={selectedTrack.type === 'recording' || selectedTrack.type === 'background'}
+            className="w-full gap-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/30 disabled:opacity-40"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete Track
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-[2] min-w-0 bg-[#09090b] border border-white/5 rounded-2xl p-4 flex flex-col shadow-xl h-full overflow-y-auto custom-scrollbar">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'screen' | 'background' | 'media' | 'emoji' | 'clips' | 'export')} className="flex-1 flex flex-col min-h-0">
+        <TabsList className="mb-4 w-full h-auto rounded-xl border border-white/5 bg-white/5 p-0.5 grid grid-cols-6 gap-0.5">
+          <TabsTrigger value="screen" className={topLevelTabClassName}>
+            Screen
+          </TabsTrigger>
+          <TabsTrigger value="background" className={topLevelTabClassName} title="Background">
+            BG
+          </TabsTrigger>
+          <TabsTrigger value="media" className={topLevelTabClassName}>
+            Media
+          </TabsTrigger>
+          <TabsTrigger value="emoji" className={topLevelTabClassName}>
+            Emoji
+          </TabsTrigger>
+          <TabsTrigger value="clips" className={topLevelTabClassName}>
+            Clips
+          </TabsTrigger>
+          <TabsTrigger value="export" className={topLevelTabClassName}>
+            Export
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="screen" className="mt-0 space-y-4">
+      {backgroundItems.length > 0 ? (
+        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[11px] text-slate-400">
+          Background source selection and segment editing moved to the <span className="font-medium text-slate-200">Background</span> tab.
         </div>
       ) : null}
       {cursorEnabled && cursorTrack && onCursorStyleChange && (
@@ -1486,10 +1818,10 @@ export function SettingsPanel({
           Crop Video
         </Button>
       </div>
-      
+
       {showCropDropdown && cropRegion && onCropChange && (
         <>
-          <div 
+          <div
             className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 animate-in fade-in duration-200"
             onClick={() => setShowCropDropdown(false)}
           />
@@ -1527,191 +1859,18 @@ export function SettingsPanel({
         </>
       )}
 
-      <Tabs defaultValue="image" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-4 h-auto rounded-xl">
-          <TabsTrigger value="image" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Image</TabsTrigger>
-          <TabsTrigger value="color" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Color</TabsTrigger>
-          <TabsTrigger value="gradient" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Gradient</TabsTrigger>
-          <TabsTrigger value="magic" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Magic</TabsTrigger>
-        </TabsList>
-        
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2">
-          <TabsContent value="image" className="mt-0 space-y-3 px-2">
-            {/* Upload Button */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleImageUpload}
-              accept=".jpg,.jpeg,image/jpeg"
-              className="hidden"
-            />
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              variant="outline"
-              className="w-full gap-2 bg-white/5 text-slate-200 border-white/10 hover:bg-[#34B27B] hover:text-white hover:border-[#34B27B] transition-all"
-            >
-              <Upload className="w-4 h-4" />
-              Upload Custom Image
-            </Button>
+      <div className="rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-[11px] text-slate-500">
+        Background source picking lives in the <span className="font-medium text-slate-300">Background</span> tab so screen controls stay focused on the canvas and recording.
+      </div>
 
-            <div className="grid grid-cols-6 gap-2.5">
-              {/* Custom Images */}
-              {customImages.map((imageUrl, idx) => {
-                const isSelected = selected === imageUrl;
-                return (
-                  <div
-                    key={`custom-${idx}`}
-                    className={cn(
-                      "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 relative group shadow-sm",
-                      isSelected
-                        ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10"
-                        : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
-                    )}
-                    style={{ backgroundImage: `url(${imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }}
-                    aria-label={`Custom Image ${idx + 1}`}
-                    onClick={() => onWallpaperChange(imageUrl)}
-                    role="button"
-                  >
-                    <button
-                      onClick={(e) => handleRemoveCustomImage(imageUrl, e)}
-                      className="absolute top-1 right-1 w-4 h-4 bg-red-500/90 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                      aria-label="Remove custom image"
-                    >
-                      <X className="w-2.5 h-2.5 text-white" />
-                    </button>
-                  </div>
-                );
-              })}
-
-              {/* Preset Wallpapers */}
-              {(wallpaperPaths.length > 0 ? wallpaperPaths : WALLPAPER_RELATIVE.map(p => `/${p}`)).map((path, idx) => {
-                const isSelected = (() => {
-                  if (!selected) return false;
-                  if (selected === path) return true;
-                  try {
-                    const clean = (s: string) => s.replace(/^file:\/\//, '').replace(/^\//, '')
-                    if (clean(selected).endsWith(clean(path))) return true;
-                    if (clean(path).endsWith(clean(selected))) return true;
-                  } catch {}
-                  return false;
-                })();
-                return (
-                  <div
-                    key={path}
-                    className={cn(
-                      "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 shadow-sm",
-                      isSelected
-                        ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10"
-                        : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
-                    )}
-                    style={{ backgroundImage: `url(${path})`, backgroundSize: "cover", backgroundPosition: "center" }}
-                    aria-label={`Wallpaper ${idx + 1}`}
-                    onClick={() => onWallpaperChange(path)}
-                    role="button"
-                  />
-                )
-              })}
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="color" className="mt-0 px-2">
-            <div className="p-1">
-              <Block
-                color={selectedColor}
-                colors={colorPalette}
-                onChange={(color) => {
-                  setSelectedColor(color.hex);
-                  onWallpaperChange(color.hex);
-                }}
-                style={{
-                  width: '100%',
-                  borderRadius: '12px',
-                }}
-              />
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="gradient" className="mt-0 px-2">
-            <div className="grid grid-cols-6 gap-2.5">
-              {GRADIENTS.map((g, idx) => (
-                <div
-                  key={g}
-                  className={cn(
-                    "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 shadow-sm",
-                    gradient === g 
-                      ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10" 
-                      : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
-                  )}
-                  style={{ background: g }}
-                  aria-label={`Gradient ${idx + 1}`}
-                  onClick={() => { setGradient(g); onWallpaperChange(g); }}
-                  role="button"
-                />
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="magic" className="mt-0 px-2">
-            <div className="grid gap-3">
-              <button
-                type="button"
-                className={cn(
-                  "relative h-28 overflow-hidden rounded-xl border-2 text-left transition-all",
-                  selected === MAGICUI_RETRO_GRID_VALUE
-                    ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 shadow-lg shadow-[#34B27B]/10"
-                    : "border-white/10 hover:border-[#34B27B]/40 bg-white/5"
-                )}
-                onClick={() => onWallpaperChange(MAGICUI_RETRO_GRID_VALUE)}
-              >
-                <div
-                  className="absolute inset-0"
-                  style={{ backgroundColor: selectedMagicBackdropColor }}
-                />
-                <RetroGrid
-                  className="opacity-80"
-                  angle={selectedRetroGridAngle}
-                  cellSize={Math.max(18, getRetroGridCellSize(selectedRetroGridDensity) - 4)}
-                  opacity={0.7}
-                  lightLineColor={selectedMagicAccentColor}
-                  darkLineColor={selectedMagicAccentColor}
-                />
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent px-3 py-2">
-                  <div className="text-xs font-medium text-slate-100">Retro Grid</div>
-                  <div className="text-[10px] text-slate-400">MagicUI preset background</div>
-                </div>
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "relative h-28 overflow-hidden rounded-xl border-2 text-left transition-all",
-                  selected === MAGICUI_RIPPLE_VALUE
-                    ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 shadow-lg shadow-[#34B27B]/10"
-                    : "border-white/10 hover:border-[#34B27B]/40 bg-white/5"
-                )}
-                onClick={() => onWallpaperChange(MAGICUI_RIPPLE_VALUE)}
-              >
-                <div
-                  className="absolute inset-0"
-                  style={{ backgroundColor: selectedMagicBackdropColor }}
-                />
-                <Ripple
-                  className="opacity-80 [mask-image:none]"
-                  mainCircleSize={120}
-                  mainCircleOpacity={0.22}
-                  numCircles={selectedRippleCount}
-                  animationDurationSeconds={getRippleAnimationDurationSeconds(selectedRippleSpeed)}
-                  style={{ color: selectedMagicAccentColor }}
-                />
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent px-3 py-2">
-                  <div className="text-xs font-medium text-slate-100">Ripple</div>
-                  <div className="text-[10px] text-slate-400">MagicUI preset background</div>
-                </div>
-              </button>
-            </div>
-          </TabsContent>
-        </div>
-      </Tabs>
-
+        </TabsContent>
+        <TabsContent value="background" className="mt-0 space-y-4">
+          {renderBackgroundTimelineList()}
+          <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[11px] text-slate-400">
+            Select a background segment from the timeline list to edit it. Use <span className="font-medium text-slate-200">New Segment</span> to clear selection, then pick a source below to add another background at the playhead.
+          </div>
+          {renderBackgroundSegmentInspector()}
+          {renderBackgroundSourcePicker()}
         </TabsContent>
         <TabsContent value="media" className="mt-0 space-y-4">
           <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
@@ -1885,6 +2044,28 @@ export function SettingsPanel({
             </div>
           </div>
         </TabsContent>
+        <TabsContent value="emoji" className="mt-0 space-y-4">
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-slate-200">Emoji Library</div>
+              <span className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Annotation</span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              Click any emoji to add a new emoji annotation at the playhead. After insertion, select it on the canvas or timeline to edit timing, placement, layer, and transitions.
+            </p>
+            <EmojiPickerPanel
+              onSelect={(emoji) => onAnnotationEmojiAdd?.({
+                src: emoji.src,
+                alt: emoji.name,
+                category: emoji.category,
+              })}
+              searchPlaceholder="Search emoji to add..."
+            />
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[11px] text-slate-400">
+            Emoji annotations are added on the annotation track. They can be moved, resized, and keyed just like other overlay elements after creation.
+          </div>
+        </TabsContent>
         <TabsContent value="clips" className="mt-0 space-y-4">
           {!selectedClip || !onClipChange ? (
             <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center">
@@ -1899,6 +2080,41 @@ export function SettingsPanel({
               {selectedClipIsRecording && (
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/90">
                   Recording transform is edited here now. Crop and roundness still live in the Screen tab.
+                </div>
+              )}
+              {onMaskAdd && (
+                <div className="rounded-xl border border-teal-500/20 bg-teal-500/10 px-3 py-3 space-y-2">
+                  <div className="text-[11px] text-teal-100/90">
+                    Add a timeline mask targeted at this clip. Rectangle and ellipse masks render in preview and export and can be moved or resized on the canvas.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="bg-[#14b8a6] text-white hover:bg-[#0f9f90]"
+                      onClick={() => onMaskAdd(selectedClip.id, 'rect')}
+                    >
+                      Add Rectangle Mask
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="bg-white/5 text-slate-200 border-white/10 hover:bg-white/10 hover:text-white"
+                      onClick={() => onMaskAdd(selectedClip.id, 'ellipse')}
+                    >
+                      Add Ellipse Mask
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="bg-white/5 text-slate-200 border-white/10 hover:bg-white/10 hover:text-white"
+                      onClick={() => onMaskAdd(selectedClip.id, 'path')}
+                    >
+                      Add Path Mask
+                    </Button>
+                  </div>
                 </div>
               )}
               {selectedClipPlacement && (
